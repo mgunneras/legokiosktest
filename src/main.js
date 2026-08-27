@@ -118,45 +118,63 @@ function brickMat(hex, ghost = false) {
 /* =========================== sound =========================== */
 /* Procedural — no asset files, nothing to fetch. A short filtered-noise tick
    (the plastic clack) over a pitched blip that rises with the stack height. */
-let actx = null, master = null, noiseBuf = null, unlocked = false;
+let actx = null, master = null, noiseBuf = null;
+let tries = 0;                      // gestures spent trying to get sound going
 
-/* Built only from inside a real gesture. A context constructed outside one is
-   born suspended on iOS and may never start, so this is never called from the
-   sound functions — only from the listeners below.                          */
+function buildCtx() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return false;
+  const c = new AC();
+  master = c.createGain();
+  master.gain.value = 0.45;
+  master.connect(c.destination);
+  const n = Math.floor(c.sampleRate * 0.05);
+  noiseBuf = c.createBuffer(1, n, c.sampleRate);
+  const ch = noiseBuf.getChannelData(0);
+  for (let i = 0; i < n; i++) ch[i] = (Math.random() * 2 - 1) * (1 - i / n);
+  return c;
+}
+
+/* Runs on every gesture, and keeps running until the context is genuinely
+   playing — never latches on a flag, because a context can be parked again
+   later by an interruption and would then never be recovered.               */
 function unlock() {
-  if (actx === null) {
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) { actx = false; return; }
-    actx = new AC();
-    master = actx.createGain();
-    master.gain.value = 0.45;
-    master.connect(actx.destination);
-    const n = Math.floor(actx.sampleRate * 0.05);
-    noiseBuf = actx.createBuffer(1, n, actx.sampleRate);
-    const ch = noiseBuf.getChannelData(0);
-    for (let i = 0; i < n; i++) ch[i] = (Math.random() * 2 - 1) * (1 - i / n);
+  if (actx && actx.state === 'running') return;
+  tries++;
+  if (!actx) {
+    actx = buildCtx();
+    if (!actx) return;
+  } else if (tries > 3) {
+    // iOS can hand back a context that will never start — typically one built
+    // during a gesture it decided not to honour. Retrying resume() on a dead
+    // context gets nowhere, so give up on it and build a fresh one inside
+    // *this* gesture, which is definitely a real activation.
+    try { actx.close(); } catch {}
+    actx = buildCtx();
+    tries = 1;
+    if (!actx) return;
   }
-  if (!actx || unlocked) return;
-  // iOS does not accept resume() on its own as permission to make noise; it
-  // wants a buffer actually played from inside the gesture. One silent sample
-  // is enough, and it is the difference between sound working on first touch
-  // and only starting once you happen to hit a button.
+  // iOS does not treat resume() on its own as permission to make noise; it
+  // wants a buffer actually played from inside the gesture.
   try {
     const src = actx.createBufferSource();
     src.buffer = actx.createBuffer(1, 1, actx.sampleRate);
     src.connect(actx.destination);
     src.start(0);
   } catch {}
-  const ok = () => { if (actx.state === 'running') { unlocked = true; voices = 0; } };
-  actx.resume().then(ok).catch(() => {});
-  ok();
+  try {
+    const p = actx.resume();        // not a promise on older webkit builds
+    if (p && p.then) p.catch(() => {});
+  } catch {}
 }
-/* Several event types on purpose. iOS honours some gestures and not others,
-   and the palette calls preventDefault() on pointerdown, which suppresses the
-   compat click a plain button tap still produces — which is exactly why sound
-   used to arrive only after pressing one of the tools. touchend survives that. */
-for (const t of ['pointerdown', 'touchend', 'mouseup', 'click', 'keydown'])
+/* Several event types on purpose: iOS honours some gestures and not others,
+   and the palette and the tools both call preventDefault() on pointerdown,
+   which suppresses the compat events a tap would otherwise produce.         */
+for (const t of ['pointerdown', 'pointerup', 'touchstart', 'touchend', 'mouseup', 'click', 'keydown'])
   addEventListener(t, unlock, { capture: true, passive: true });
+const audioState = () => actx === false ? 'unsupported'
+                       : !actx          ? 'idle'
+                       : `${actx.state}/${tries}`;
 
 function audio() {
   if (!actx) return null;
@@ -170,19 +188,23 @@ function audio() {
 }
 
 /* Each sound builds a throwaway graph wired to `master`. Safari is slow to
-   reclaim AudioNodes that are still connected to the destination, so a few
-   hundred clicks leaves a few hundred dead chains hanging off it and the audio
-   starts dropping out — which is exactly what a long build does. Tear the
-   chain down the moment the source ends, and cap how many can be alive.     */
-let voices = 0;
+   reclaim AudioNodes still connected to the destination, so a few hundred
+   clicks leaves a few hundred dead chains hanging off it and the audio starts
+   dropping out — exactly what a long build does. Tear the chain down when the
+   source ends, and cap how many can be alive at once.
+
+   The cap is a list of scheduled end times, not a counter. A counter only goes
+   back down in `onended`, which never fires if the context is parked mid-sound
+   — so it leaks, hits the cap, and silences everything permanently with no way
+   back. Times simply expire.                                                */
+const live = [];
 const MAX_VOICES = 14;
 function play(src, chain, t, stopAt) {
-  if (voices >= MAX_VOICES) return;
-  voices++;
-  src.onended = () => {
-    voices--;
-    for (const n of chain) { try { n.disconnect(); } catch {} }
-  };
+  const now = actx.currentTime;
+  for (let i = live.length - 1; i >= 0; i--) if (live[i] <= now) live.splice(i, 1);
+  if (live.length >= MAX_VOICES) return;
+  live.push(stopAt);
+  src.onended = () => { for (const n of chain) { try { n.disconnect(); } catch {} } };
   src.start(t);
   src.stop(stopAt);
 }
@@ -1049,7 +1071,7 @@ function tick(now) {
   stepFlight(dt);
   renderer.render(scene, camera);
   if (++frames >= 30) {
-    statsEl.textContent = `${Math.round(frames * 1000 / (now - fpsT))} fps · ${placed.length} bricks · ${drags.size + nav.size} touches`;
+    statsEl.textContent = `${Math.round(frames * 1000 / (now - fpsT))} fps · ${placed.length} bricks · ${drags.size + nav.size} touches · audio ${audioState()}`;
     fpsT = now; frames = 0;
   }
   requestAnimationFrame(tick);
@@ -1064,4 +1086,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };

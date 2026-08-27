@@ -157,6 +157,11 @@ Keyboard: `R` rotate, `Z` undo.
   long fall reads as a gunshot); coming loose and being thrown are the same
   sweep run in both directions; a botched landing is filtered noise; refusing is
   a squarewave two-step down, deliberately the ugliest thing here.
+- **Diagnosing audio on the device.** The bottom-right readout ends with
+  `audio <state>/<tries>` — `idle` before any gesture, then the context's own
+  state and how many gestures have been spent trying to start it. `running/1`
+  is healthy. Anything stuck on `suspended` means the browser is refusing, and
+  the number says whether `unlock()` is even being reached.
 - **iOS audio needs a gesture, and not just any gesture.** The context is built
   only from inside a listener, never from a sound call, because one constructed
   outside a gesture is born suspended and may never start. `resume()` alone is
@@ -167,6 +172,13 @@ Keyboard: `R` rotate, `Z` undo.
   sound used to arrive only after pressing one of the tools. Every voice is torn
   down on `ended`; Safari is slow to reclaim nodes still wired to the
   destination, and a long build otherwise leaves hundreds hanging off `master`.
+  The concurrency cap is a list of scheduled end times rather than a counter,
+  because a counter only decrements in `onended` — which never fires if the
+  context parks mid-sound, so it leaks up to the cap and silences everything
+  permanently. `unlock()` likewise never latches on a flag: it keeps running on
+  every gesture until the context is genuinely playing, and if a context refuses
+  to start after a few attempts it is closed and rebuilt inside the current
+  gesture, since iOS can hand back one that will never start.
 - `window.__kiosk` exposes state for on-site debugging.
 
 ## Hosted build (one shareable file)
