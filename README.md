@@ -28,7 +28,12 @@ Kiosk shell (Electron — fullscreen, frameless, locked):
 | Menu | release | brick falls from your hand into the socket — pop, and the board bounces |
 | Plate | drop onto a placed brick | it stacks; courses can be staggered or overhang |
 | Plate | spin it while holding a brick | the held brick keeps its orientation, so it lands on whichever grid axis is now nearest — this is how you turn a brick 90° |
+| Plate | release while still moving | the brick is thrown — it arcs in and clicks home |
+| Plate | press and hold a brick (300ms) | edges light, then it lifts back into your hand |
+| Plate | double-tap a brick | it gets chucked off the table |
+| Plate | release off the build | it lands on the desk and stays there, pickable later |
 | ROTATE | tap | optional 90° offset if you'd rather not spin the view |
+| CLEAR | tap | demolition — the build leaves one brick at a time |
 
 Keyboard: `R` rotate, `Z` undo.
 
@@ -120,6 +125,38 @@ Keyboard: `R` rotate, `Z` undo.
   window — they just aren't what the teardown depends on. Every exit funnels
   through `closeDrag()`; `blur` and `visibilitychange` abort live drags, since
   alt-tab can swallow the `pointerup` outright, and a cancel drops nothing.
+- **Three states, one at a time.** `placed` is the build: seated, grid-aligned,
+  part of `heights`. `loose` is the desk: resting where it fell, at any angle, in
+  no grid — pickable (`pickList`) but deliberately never stackable (`hitList`),
+  since an off-grid brick has no column to resolve against. `flying` is neither:
+  owned by the simulation until it commits to one of the others, or to nothing.
+- **Throwing.** Release with the hand still moving and the brick arcs in. Hand
+  speed and launch speed are different scales — an ordinary drag clocks ~19u/s
+  across the hover plane and a real flick ~110, but a brick only wants to travel
+  a few studs, so the throw is a scaled, clamped version of the hand: ~2 studs
+  for a nudge, ~10 for a hard one. Whether it sticks is rolled at launch, not on
+  arrival, so a dud tumbles the whole way in. Overshooting the board fails
+  regardless of the roll, which gives the throw some actual skill.
+- **Picking a brick back up** is a hold, not a tap, so it can't fight the orbit:
+  the hold is abandoned the moment the finger travels more than `HOLD_SLOP`.
+  Blocked if anything rests on it — every column under the footprint must top
+  out at that brick — which is also what makes `rebuildHeights()` safe to replay
+  after a removal, since nothing above could have depended on it.
+- **Sounds are separated by shape, not just pitch,** so they're told apart with
+  no attention paid: seating is a very short high sine tick (a low body with a
+  long fall reads as a gunshot); coming loose and being thrown are the same
+  sweep run in both directions; a botched landing is filtered noise; refusing is
+  a squarewave two-step down, deliberately the ugliest thing here.
+- **iOS audio needs a gesture, and not just any gesture.** The context is built
+  only from inside a listener, never from a sound call, because one constructed
+  outside a gesture is born suspended and may never start. `resume()` alone is
+  not enough for Safari either — it wants a buffer actually played inside the
+  gesture, so `unlock()` fires one silent sample. It listens on several event
+  types because the palette calls `preventDefault()` on pointerdown, which
+  suppresses the compat click a plain button tap still produces — which is why
+  sound used to arrive only after pressing one of the tools. Every voice is torn
+  down on `ended`; Safari is slow to reclaim nodes still wired to the
+  destination, and a long build otherwise leaves hundreds hanging off `master`.
 - `window.__kiosk` exposes state for on-site debugging.
 
 ## Hosted build (one shareable file)

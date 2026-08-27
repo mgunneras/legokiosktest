@@ -27,6 +27,14 @@ const FLICK_FAST  = 40;           // hardest: ~10 studs, and easy to overshoot
 const FLICK_LIFT  = 0.18;         // fraction of speed added upward, to make an arc
 const CRASH_ODDS  = 0.2;          // one in five is a dud, as asked
 const ESCAPE      = 24;           // outward kick on a botched landing
+const ESCAPE_SOFT = 9;            // ...and a gentler one, to shed onto the table
+const TABLE_Y     = -PLATE - 0.005;   // the desk the baseplate sits on
+const TABLE_R     = GRID * 1.25 - 1;  // ...as far as a brick can come to rest
+const HOLD_MS     = 300;          // press-and-hold before a brick comes loose
+const HOLD_SLOP   = 7;            // px of travel that turns a hold into an orbit
+const DOUBLE_MS   = 340;
+const CHUCK_UP    = 30;           // double-tap launch speed; apex ~4-7u, not ~1
+const DEMO_GAP    = 0.08;         // seconds between bricks when CLEAR goes off
 const FLIGHT_MAX = 8;             // seconds before a stray brick is reclaimed
 
 /* ---------- palette ---------- */
@@ -66,7 +74,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const SKY = '#e8eef7';
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SKY);
-scene.fog = new THREE.Fog(SKY, 52, 96);
+scene.fog = new THREE.Fog(SKY, 62, 108);
 
 const camera = new THREE.PerspectiveCamera(38, 1, 0.5, 200);
 const TARGET = new THREE.Vector3(0, 1.2, 0);
@@ -82,7 +90,7 @@ sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
 sun.shadow.radius = 2;
 const sc = sun.shadow.camera;
-sc.left = -14; sc.right = 14; sc.top = 14; sc.bottom = -14; sc.near = 1; sc.far = 46;
+sc.left = -21; sc.right = 21; sc.top = 21; sc.bottom = -21; sc.near = 1; sc.far = 52;
 scene.add(sun);
 const rim = new THREE.DirectionalLight('#a9c6ee', 0.34);
 rim.position.set(-8, 6, -9);
@@ -91,6 +99,7 @@ scene.add(rim);
 /* ---------- shared geometry ---------- */
 const studGeo = new THREE.CylinderGeometry(STUD_R, STUD_R, STUD_H, 14);
 const boxGeo  = new THREE.BoxGeometry(1, 1, 1);
+const edgeGeo = new THREE.EdgesGeometry(boxGeo);   // for the press highlight
 const matCache = new Map();
 function brickMat(hex, ghost = false) {
   const key = hex + (ghost ? '_g' : '');
@@ -106,12 +115,16 @@ function brickMat(hex, ghost = false) {
 /* =========================== sound =========================== */
 /* Procedural — no asset files, nothing to fetch. A short filtered-noise tick
    (the plastic clack) over a pitched blip that rises with the stack height. */
-let actx = null, master = null, noiseBuf = null;
-function audio() {
+let actx = null, master = null, noiseBuf = null, unlocked = false;
+
+/* Built only from inside a real gesture. A context constructed outside one is
+   born suspended on iOS and may never start, so this is never called from the
+   sound functions — only from the listeners below.                          */
+function unlock() {
   if (actx === null) {
     const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) { actx = false; return null; }
-    actx  = new AC();
+    if (!AC) { actx = false; return; }
+    actx = new AC();
     master = actx.createGain();
     master.gain.value = 0.45;
     master.connect(actx.destination);
@@ -120,36 +133,117 @@ function audio() {
     const ch = noiseBuf.getChannelData(0);
     for (let i = 0; i < n; i++) ch[i] = (Math.random() * 2 - 1) * (1 - i / n);
   }
+  if (!actx || unlocked) return;
+  // iOS does not accept resume() on its own as permission to make noise; it
+  // wants a buffer actually played from inside the gesture. One silent sample
+  // is enough, and it is the difference between sound working on first touch
+  // and only starting once you happen to hit a button.
+  try {
+    const src = actx.createBufferSource();
+    src.buffer = actx.createBuffer(1, 1, actx.sampleRate);
+    src.connect(actx.destination);
+    src.start(0);
+  } catch {}
+  const ok = () => { if (actx.state === 'running') { unlocked = true; voices = 0; } };
+  actx.resume().then(ok).catch(() => {});
+  ok();
+}
+/* Several event types on purpose. iOS honours some gestures and not others,
+   and the palette calls preventDefault() on pointerdown, which suppresses the
+   compat click a plain button tap still produces — which is exactly why sound
+   used to arrive only after pressing one of the tools. touchend survives that. */
+for (const t of ['pointerdown', 'touchend', 'mouseup', 'click', 'keydown'])
+  addEventListener(t, unlock, { capture: true, passive: true });
+
+function audio() {
   if (!actx) return null;
-  if (actx.state === 'suspended') actx.resume().catch(() => {});
+  // Not just 'suspended': iOS parks a context in a non-standard 'interrupted'
+  // state after a call or a tab switch, and checking 'suspended' alone never
+  // recovers from it. Nothing scheduled on a parked context ever runs, so its
+  // `onended` never fires and the voice count would saturate and mute the app
+  // for good — play nothing until it is genuinely running.
+  if (actx.state !== 'running') { actx.resume().catch(() => {}); return null; }
   return actx;
 }
-/* audio may only start inside a gesture — arm it on the kiosk's first touch */
-addEventListener('pointerdown', audio, { capture: true });
+
+/* Each sound builds a throwaway graph wired to `master`. Safari is slow to
+   reclaim AudioNodes that are still connected to the destination, so a few
+   hundred clicks leaves a few hundred dead chains hanging off it and the audio
+   starts dropping out — which is exactly what a long build does. Tear the
+   chain down the moment the source ends, and cap how many can be alive.     */
+let voices = 0;
+const MAX_VOICES = 14;
+function play(src, chain, t, stopAt) {
+  if (voices >= MAX_VOICES) return;
+  voices++;
+  src.onended = () => {
+    voices--;
+    for (const n of chain) { try { n.disconnect(); } catch {} }
+  };
+  src.start(t);
+  src.stop(stopAt);
+}
 
 function popSound(level) {
   const a = audio();
   if (!a) return;
   const t = a.currentTime + 0.001;
-  const f = 300 * Math.pow(1.07, level) * (0.96 + Math.random() * 0.08);
+  // High and over almost before it starts. A low body with a long fall is what
+  // made this read as a gunshot; a stud going home is a tiny hard tick.
+  const f = Math.min(1750 * Math.pow(1.03, level), 3200) * (0.97 + Math.random() * 0.06);
 
-  const osc = a.createOscillator(), og = a.createGain();   // the "pop" body
-  osc.type = 'triangle';
-  osc.frequency.setValueAtTime(f * 2.4, t);
-  osc.frequency.exponentialRampToValueAtTime(f, t + 0.045);
+  const osc = a.createOscillator(), og = a.createGain();   // the click body
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(f, t);
+  osc.frequency.exponentialRampToValueAtTime(f * 0.86, t + 0.03);
   og.gain.setValueAtTime(0.0001, t);
-  og.gain.exponentialRampToValueAtTime(0.5, t + 0.005);
-  og.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
+  og.gain.exponentialRampToValueAtTime(0.32, t + 0.003);
+  og.gain.exponentialRampToValueAtTime(0.0001, t + 0.042);
   osc.connect(og).connect(master);
-  osc.start(t); osc.stop(t + 0.14);
+  play(osc, [osc, og], t, t + 0.05);
 
   const src = a.createBufferSource(), bp = a.createBiquadFilter(), ng = a.createGain();
   src.buffer = noiseBuf;                                   // the plastic transient
-  bp.type = 'bandpass'; bp.frequency.value = 1900; bp.Q.value = 1.1;
-  ng.gain.setValueAtTime(0.35, t);
-  ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+  bp.type = 'highpass'; bp.frequency.value = 4200;
+  ng.gain.setValueAtTime(0.15, t);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.016);
   src.connect(bp).connect(ng).connect(master);
-  src.start(t); src.stop(t + 0.06);
+  play(src, [src, bp, ng], t, t + 0.02);
+}
+
+/* Coming loose, and being thrown away — the same sweep run in both directions,
+   so they're obviously a pair and obviously not the seating pop.            */
+function pluckSound(up) {
+  const a = audio();
+  if (!a) return;
+  const t = a.currentTime + 0.001;
+  const o = a.createOscillator(), g = a.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(up ? 260 : 720, t);
+  o.frequency.exponentialRampToValueAtTime(up ? 720 : 240, t + 0.11);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.32, t + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+  o.connect(g).connect(master);
+  play(o, [o, g], t, t + 0.17);
+}
+
+/* Can't do that: a short buzzy two-step down. Deliberately the ugliest sound
+   here — square wave, low, dissonant against the rest.                      */
+function nope() {
+  const a = audio();
+  if (!a) return;
+  const t = a.currentTime + 0.001;
+  const o = a.createOscillator(), g = a.createGain();
+  o.type = 'square';
+  o.frequency.setValueAtTime(150, t);
+  o.frequency.setValueAtTime(104, t + 0.055);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.17, t + 0.008);
+  g.gain.setValueAtTime(0.17, t + 0.05);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
+  o.connect(g).connect(master);
+  play(o, [o, g], t, t + 0.14);
 }
 
 /* A botched landing: duller and broader than the pop, no pitched body — it
@@ -164,7 +258,7 @@ function clatter() {
   g.gain.setValueAtTime(0.30, t);
   g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
   src.connect(bp).connect(g).connect(master);
-  src.start(t); src.stop(t + 0.1);
+  play(src, [src, bp, g], t, t + 0.1);
 }
 
 /* =========================== impact springs =========================== */
@@ -229,7 +323,7 @@ build.add(plateGroup);
   plateGroup.add(inst);
 
   const skirt = new THREE.Mesh(
-    new THREE.CylinderGeometry(GRID * 0.92, GRID * 0.92, 0.05, 64),
+    new THREE.CylinderGeometry(GRID * 1.25, GRID * 1.25, 0.05, 72),
     new THREE.MeshBasicMaterial({ color:'#d5deec' })
   );
   skirt.position.y = -PLATE - 0.03;
@@ -238,13 +332,47 @@ build.add(plateGroup);
 
 /* ---------- world state ---------- */
 const heights = new Int16Array(GRID * GRID);      // stacked height per column, in plates
-const placed  = [];                               // { group, def, i0, j0, h0 }
-const flying  = [];                               // bricks mid-throw
+/* A brick is in exactly one of these at a time. `placed` is the build: seated,
+   grid-aligned, part of `heights`. `loose` is the desk: resting where it fell,
+   at whatever angle, in no grid at all. `flying` is neither — in the air, owned
+   by the simulation, and committed to one of the other two (or to nothing) when
+   it comes down. */
+const placed  = [];                               // { g, def, sol, rot, kind }
+const loose   = [];                               // { g, def, kind } — on the desk
+const flying  = [];                               // bricks mid-air
+const pickList = [];                              // what a finger can press on
 const hitList = [];                               // meshes eligible for raycast
 plateGroup.traverse(o => { if (o.isMesh && o.userData.isBase) hitList.push(o); });
 
 const H = (i, j) => heights[j * GRID + i];
 const setH = (i, j, v) => { heights[j * GRID + i] = v; };
+const drop1 = (arr, v) => { const i = arr.indexOf(v); if (i >= 0) arr.splice(i, 1); };
+
+/* Replayed in placement order, because each brick's `sol.h` was resolved against
+   the state at the time it landed. Safe to rebuild after a removal only because
+   nothing can be removed while something rests on it — see `isFree`.          */
+function rebuildHeights() {
+  heights.fill(0);
+  for (const p of placed)
+    for (let i = p.sol.i0; i < p.sol.i0 + p.sol.w; i++)
+      for (let j = p.sol.j0; j < p.sol.j0 + p.sol.d; j++) setH(i, j, p.sol.h + p.def.p);
+}
+/* Nothing on top: every column under the footprint tops out at this brick. */
+function isFree(rec) {
+  if (rec.kind === 'loose') return true;
+  const s = rec.sol, top = s.h + rec.def.p;
+  for (let i = s.i0; i < s.i0 + s.w; i++)
+    for (let j = s.j0; j < s.j0 + s.d; j++) if (H(i, j) !== top) return false;
+  return true;
+}
+/* Out of whichever world it was in, and out of every list that referenced it. */
+function detach(rec) {
+  if (rec.kind === 'placed') { drop1(placed, rec); rebuildHeights(); }
+  else                       { drop1(loose, rec); }
+  drop1(hitList, rec.g.userData.pickBody);
+  drop1(pickList, rec.g.userData.pickBody);
+  build.remove(rec.g);
+}
 
 /* =========================== camera rig =========================== */
 const view = { az: -0.7, pol: 0.92, rad: 34, taz: -0.7, tpol: 0.92, trad: 34 };
@@ -290,12 +418,16 @@ const nav   = new Map();   // pointerId -> {x,y}
 const drags = new Map();   // pointerId -> {def, tile, held, ghost, sol, rot, az0}
 let pinch = null;          // {dist, rad, mx, az}
 let manualRot = 0;         // optional 90° offset; the plate's angle does the rest
-let flickOn = true;        // throwing; off = every release is a plain drop
+let flickOn = true;        // throwing; F turns it off, there is no button
 let selected = 0;
 
 /* ---------- navigation (stage) ---------- */
 stageEl.addEventListener('pointerdown', e => {
   try { stageEl.setPointerCapture(e.pointerId); } catch {}
+  if (castFrom(e.clientX, e.clientY)) {           // did it land on a brick?
+    const hit = ray.intersectObjects(pickList, false)[0];
+    if (hit && hit.object.userData.owner) startHold(e, hit.object.userData.owner);
+  }
   nav.set(e.pointerId, { x:e.clientX, y:e.clientY });
   if (nav.size === 2) startPinch();
 });
@@ -375,6 +507,74 @@ const overBoard = p => Math.abs(p.x) <= GRID / 2 && Math.abs(p.z) <= GRID / 2;
 
 const placeX = (i0, w) => i0 - GRID / 2 + w / 2;
 
+/* =========================== press and hold =========================== */
+/* Press a brick and its edges light; keep pressing and it comes loose into your
+   hand. A press that travels is an orbit instead, so the two never fight — the
+   hold is abandoned the moment the finger moves more than a few pixels.      */
+const holds = new Map();        // pointerId -> { rec, line, t0, x0, y0, x, y, blocked }
+let lastTap = { rec: null, t: 0 };
+
+function startHold(e, rec) {
+  const blocked = !isFree(rec);
+  const body = rec.g.userData.pickBody;
+  // Depth-tested on purpose: drawing through the brick reads as an x-ray cage
+  // rather than its edges lighting up. Nudged out just far enough to clear the
+  // surface without z-fighting.
+  const line = new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({
+    color: blocked ? '#ff3b3b' : '#ffd21e', transparent: true, opacity: 0.35,
+    depthWrite: false,
+  }));
+  line.scale.copy(body.scale).multiplyScalar(1.03);
+  line.position.copy(body.position);
+  line.renderOrder = 2;
+  rec.g.add(line);
+  holds.set(e.pointerId, { rec, blocked, line, t0: performance.now(),
+                           x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY });
+}
+function cancelHold(pid) {
+  const h = holds.get(pid);
+  if (!h) return;
+  h.rec.g.remove(h.line);
+  h.line.material.dispose();
+  holds.delete(pid);
+}
+function tickHolds(now) {
+  for (const [pid, h] of holds) {
+    const t = Math.min((now - h.t0) / HOLD_MS, 1);
+    h.line.material.opacity = 0.35 + t * 0.65;    // the edges brighten as it loosens
+    if (t < 1) continue;
+    if (!h.blocked) liftBrick(pid, h);
+    else if (!h.buzzed) { h.buzzed = true; nope(); }   // held long enough to mean it
+  }
+}
+/* Straight from the build into the hand: same drag session a palette brick gets,
+   seeded so it keeps the orientation it was sitting in.                      */
+function liftBrick(pid, h) {
+  const rec = h.rec;
+  cancelHold(pid);
+  nav.delete(pid);                                // this is a drag now, not an orbit
+  pinch = null;
+  const seed = rec.kind === 'placed' ? rec.rot : undefined;
+  const def = rec.def;
+  detach(rec);
+  pluckSound(true);
+  beginDrag({ pointerId: pid, clientX: h.x, clientY: h.y }, def, null, seed);
+}
+/* A press that neither travelled nor lasted is a tap; two of them chuck it. */
+function tapHold(e) {
+  const h = holds.get(e.pointerId);
+  if (!h) return;
+  const rec = h.rec, blocked = h.blocked;
+  cancelHold(e.pointerId);
+  const now = performance.now();
+  if (lastTap.rec === rec && now - lastTap.t < DOUBLE_MS) {
+    lastTap = { rec: null, t: 0 };
+    blocked ? nope() : chuck(rec);
+  } else {
+    lastTap = { rec, t: now };
+  }
+}
+
 /* =========================== drag sessions =========================== */
 /* A held brick hangs off your finger in 3D and keeps the orientation it has in
    the air. Spinning the plate underneath turns the grid, not the brick — so it
@@ -397,22 +597,26 @@ function gridRot(s) {
   return (s.rot0 + manualRot + steps) & 1;   // a footprint only cares about parity
 }
 
-function beginDrag(e, def, srcEl) {
+function beginDrag(e, def, srcEl, seedRot) {
   // A pointer id gets reused — a mouse is always id 1 — so a session that was
   // somehow left open would be overwritten here and orphan its tile and brick
   // in the scene with nothing left holding a reference to them.
   const stale = drags.get(e.pointerId);
   if (stale) closeDrag(stale, e.pointerId);
 
-  const tile = document.createElement('div');      // stand-in while over the menu
-  tile.className = 'tile';
-  tile.appendChild(srcEl.querySelector('.swatch').cloneNode(true));
-  document.getElementById('chips').appendChild(tile);
+  let tile = null;                                // a brick lifted off the build is
+  if (srcEl) {                                    // already in 3D — no chip needed
+    tile = document.createElement('div');         // stand-in while over the menu
+    tile.className = 'tile';
+    tile.appendChild(srcEl.querySelector('.swatch').cloneNode(true));
+    document.getElementById('chips').appendChild(tile);
+  }
   // Baseline set once, at pickup. `steps` still turns the brick against the
   // grid as the plate spins under it, so the pickup orientation moves with the
   // camera without disturbing that.
   const s = { def, tile, src:srcEl, x:e.clientX, y:e.clientY, az0:view.az,
-              rot0:screenParity(def), held:null, ghost:null, rot:-1, sol:null,
+              rot0: seedRot === undefined ? screenParity(def) : ((seedRot - manualRot) & 1),
+              held:null, ghost:null, rot:-1, sol:null,
               vel:new THREE.Vector3(), lastPos:new THREE.Vector3(), lastT:0 };
   drags.set(e.pointerId, s);
   refreshDrag(s);
@@ -426,9 +630,11 @@ function moveDrag(e, s) {
 function refreshDrag(s) {
   const over = castFrom(s.x, s.y);
 
-  s.tile.style.left = s.x + 'px';
-  s.tile.style.top  = s.y + 'px';
-  s.tile.style.display = over ? 'none' : 'block';   // 3D takes over on the stage
+  if (s.tile) {
+    s.tile.style.left = s.x + 'px';
+    s.tile.style.top  = s.y + 'px';
+    s.tile.style.display = over ? 'none' : 'block'; // 3D takes over on the stage
+  }
 
   const rot = gridRot(s);
   if (rot !== s.rot) {                              // snapped to the other grid axis
@@ -484,8 +690,8 @@ function closeDrag(s, id) {
   drags.delete(id);
   if (s.ghost) build.remove(s.ghost);
   if (s.held)  scene.remove(s.held);
-  s.tile.remove();
-  s.src.classList.remove('press');
+  if (s.tile) s.tile.remove();
+  if (s.src)  s.src.classList.remove('press');
 }
 function endDrag(e) {                       // released: throw it, or drop it if it fits
   const s = drags.get(e.pointerId);
@@ -496,6 +702,7 @@ function endDrag(e) {                       // released: throw it, or drop it if
   closeDrag(s, e.pointerId);
   if (thrown)              launch(def, rot, from, vel);
   else if (sol && sol.ok)  place(def, sol, rot, from);
+  else if (from)           discard(def, rot, from, vel);   // off the build: onto the desk
 }
 function abortDrag(e) {                     // cancelled, not released: drop nothing
   const s = drags.get(e.pointerId);
@@ -503,10 +710,11 @@ function abortDrag(e) {                     // cancelled, not released: drop not
 }
 function abortAllDrags() {
   for (const [id, s] of drags) closeDrag(s, id);
+  for (const id of [...holds.keys()]) cancelHold(id);
 }
 /* Seat a brick in the grid for good. Both a dropped brick and one that sticks
    its landing come through here, so they end up identically undoable.        */
-function commit(g, def, sol) {
+function commit(g, def, sol, rot) {
   const base = new THREE.Vector3(placeX(sol.i0, sol.w), sol.h * PLATE, placeX(sol.j0, sol.d));
   g.position.copy(base);
   g.rotation.set(0, 0, 0);
@@ -514,14 +722,16 @@ function commit(g, def, sol) {
   hitList.push(g.userData.pickBody);
   for (let i = sol.i0; i < sol.i0 + sol.w; i++)
     for (let j = sol.j0; j < sol.j0 + sol.d; j++) setH(i, j, sol.h + def.p);
-  const p = { g, def, sol, base, anim: null };
+  const p = { g, def, sol, rot, base, anim: null, kind: 'placed' };
+  g.userData.pickBody.userData.owner = p;
+  pickList.push(g.userData.pickBody);
   placed.push(p);
   return p;
 }
 const turned = (def, rot) => rot ? { ...def, w:def.d, d:def.w } : def;
 
 function place(def, sol, rot, from) {
-  const p = commit(buildBrick(turned(def, rot)), def, sol);
+  const p = commit(buildBrick(turned(def, rot)), def, sol, rot);
   // fall into the socket from wherever the hand released it (`from` is world,
   // `base` is board-local — they differ by however far the board is bouncing)
   const off = from ? from.clone().sub(p.base) : new THREE.Vector3(0, 0.9, 0);
@@ -554,7 +764,7 @@ function launch(def, rot, from, vel) {
 
 /* A landing that doesn't take: kick it away from the middle of the board so it
    can't settle back down, and give it a tumble it never recovers from.       */
-function botch(f, top) {
+function botch(f, top, kick = ESCAPE, lift = 18) {
   const p = f.g.position;
   p.y = top + 0.001;
   f.bounces++;
@@ -563,14 +773,109 @@ function botch(f, top) {
   if (out.lengthSq() < 1) out.set(f.vel.x, 0, f.vel.z);
   if (out.lengthSq() < 1e-6) out.set(1, 0, 0);
   out.normalize();
-  f.vel.set(out.x * ESCAPE + f.vel.x * 0.25,
-            Math.abs(f.vel.y) * 0.4 + 18,        // enough hang time to clear the board
-            out.z * ESCAPE + f.vel.z * 0.25);
+  f.vel.set(out.x * kick + f.vel.x * 0.25,
+            Math.abs(f.vel.y) * 0.4 + lift,      // enough hang time to clear the board
+            out.z * kick + f.vel.z * 0.25);
   f.spin = new THREE.Vector3((Math.random() * 2 - 1) * 7,
                              (Math.random() * 2 - 1) * 6,
                              (Math.random() * 2 - 1) * 7);
   boardY.v -= 0.05;
   clatter();
+}
+
+/* Released off the build: it doesn't vanish, it lands on the desk and stays
+   there, at whatever angle it came to rest — no grid, no stack, still yours. */
+function discard(def, rot, from, vel) {
+  const g = buildBrick(turned(def, rot));
+  g.position.copy(from);
+  g.position.y -= build.position.y;
+  build.add(g);
+  const v = vel.clone().multiplyScalar(FLICK_SCALE * 0.6);
+  if (v.length() > 14) v.setLength(14);
+  flying.push({ g, def, rot, mode:'discard', vel:v, bounces:0, age:0, sticks:false,
+                spin: new THREE.Vector3((Math.random() * 2 - 1) * 3,
+                                        (Math.random() * 2 - 1) * 4,
+                                        (Math.random() * 2 - 1) * 3) });
+}
+/* Double-tapped: off the table it goes. Launched as a throw that is already
+   doomed, so the ordinary botch path carries it away.                        */
+function chuck(rec, boost = 1) {
+  const { g, def } = rec, rot = rec.rot || 0;
+  detach(rec);
+  build.add(g);
+  // Straight up and radially out is tidy and dull. Scatter the heading either
+  // side of "away from the middle" and give it a properly silly amount of
+  // height, so no two go the same way and none of them look deliberate.
+  const out = new THREE.Vector3(g.position.x, 0, g.position.z);
+  if (out.lengthSq() < 1) out.set(1, 0, 0);
+  out.normalize();
+  const heading = Math.atan2(out.z, out.x) + (Math.random() - 0.5) * 1.3;
+  const away    = (10 + Math.random() * 11) * boost;
+  flying.push({ g, def, rot, mode:'throw', sticks:false, bounces:0, age:0,
+                vel: new THREE.Vector3(Math.cos(heading) * away,
+                                       (CHUCK_UP + Math.random() * 10) * boost,
+                                       Math.sin(heading) * away),
+                spin: new THREE.Vector3((Math.random() * 2 - 1) * 11,
+                                        (Math.random() * 2 - 1) * 9,
+                                        (Math.random() * 2 - 1) * 11) });
+  pluckSound(false);
+}
+/* Coming to rest on the desk: each bounce flattens what is left of the tumble,
+   so it is already lying flat by the time it stops and nothing has to snap. */
+function tableBounce(f) {
+  const p = f.g.position;
+  p.y = TABLE_Y;
+  f.bounces++;
+  f.vel.y = -f.vel.y * 0.42;
+  f.vel.x *= 0.6; f.vel.z *= 0.6;
+  f.g.rotation.x *= 0.35; f.g.rotation.z *= 0.35;
+  if (f.spin) f.spin.multiplyScalar(0.45);
+  clatter();
+  if (f.vel.y >= 2.2 && f.bounces < 3) return false;
+  f.g.rotation.x = 0; f.g.rotation.z = 0;      // flat on the desk, yaw kept
+  const rec = { g: f.g, def: f.def, kind: 'loose' };
+  f.g.userData.pickBody.userData.owner = rec;
+  pickList.push(f.g.userData.pickBody);         // pickable, but never stackable:
+  loose.push(rec);                              // deliberately not in hitList
+  return true;
+}
+
+/* A brick on its way off the table still has to deal with the table. It skips
+   outward instead of settling, so a wider desk means a longer, sillier exit —
+   never a brick sinking through the surface it should be bouncing on.       */
+function skitter(f) {
+  const p = f.g.position;
+  p.y = TABLE_Y;
+  f.bounces++;
+  f.vel.y = Math.abs(f.vel.y) * 0.45 + 7;
+  const out = new THREE.Vector3(p.x, 0, p.z);
+  if (out.lengthSq() < 1) out.set(f.vel.x, 0, f.vel.z);
+  if (out.lengthSq() < 1e-6) out.set(1, 0, 0);
+  out.normalize();
+  f.vel.x = f.vel.x * 0.7 + out.x * 12;      // always gains ground outward, so it
+  f.vel.z = f.vel.z * 0.7 + out.z * 12;      // is guaranteed to clear the edge
+  clatter();
+}
+
+/* CLEAR doesn't tidy up, it detonates. One brick per beat rather than all at
+   once, because a single frame where everything leaves is just a disappearance
+   — the stagger is what makes it read as bam, bam, bam. Tallest first, so the
+   build comes apart from the top instead of leaving pieces hanging in mid-air. */
+const demolition = [];
+let demoT = 0;
+function demolish() {
+  demolition.length = 0;
+  demolition.push(...placed.slice().sort((a, b) =>
+    (b.sol.h + b.def.p) - (a.sol.h + a.def.p)), ...loose.slice());
+  demoT = 0;
+}
+function stepDemolition(dt) {
+  if (!demolition.length) return;
+  demoT -= dt;
+  if (demoT > 0) return;
+  demoT = DEMO_GAP;
+  const rec = demolition.shift();
+  if (rec && (placed.includes(rec) || loose.includes(rec))) chuck(rec, 1.25);
 }
 
 function stepFlight(dt) {
@@ -586,15 +891,22 @@ function stepFlight(dt) {
     }
 
     const p = f.g.position;
-    if (f.vel.y < 0 && overBoard(p)) {
-      const sol = solveAt(p.x, p.z, f.def, f.rot);
-      if (p.y <= sol.h * PLATE) {
-        if (f.sticks && sol.ok) {
-          land(commit(f.g, f.def, sol));          // clicks in exactly like a drop
-          flying.splice(n, 1);
-          continue;
+    if (f.vel.y < 0) {
+      if (overBoard(p)) {
+        const sol = solveAt(p.x, p.z, f.def, f.rot);
+        if (p.y <= sol.h * PLATE) {
+          if (f.sticks && sol.ok) {
+            land(commit(f.g, f.def, sol, f.rot));   // clicks in exactly like a drop
+            flying.splice(n, 1);
+            continue;
+          }
+          // a discard that came down over the build sheds sideways onto the desk
+          f.mode === 'discard' ? botch(f, sol.h * PLATE, ESCAPE_SOFT, 7)
+                               : botch(f, sol.h * PLATE);
         }
-        botch(f, sol.h * PLATE);
+      } else if (p.y <= TABLE_Y && Math.hypot(p.x, p.z) <= TABLE_R) {
+        if (f.mode === 'discard') { if (tableBounce(f)) { flying.splice(n, 1); continue; } }
+        else skitter(f);
       }
     }
     if (p.y < -25 || f.age > FLIGHT_MAX) {        // gone off the table for good
@@ -605,14 +917,8 @@ function stepFlight(dt) {
 }
 
 function undo() {
-  const last = placed.pop();
-  if (!last) return;
-  build.remove(last.g);
-  hitList.splice(hitList.indexOf(last.g.userData.pickBody), 1);
-  heights.fill(0);
-  for (const p of placed)
-    for (let i = p.sol.i0; i < p.sol.i0 + p.sol.w; i++)
-      for (let j = p.sol.j0; j < p.sol.j0 + p.sol.d; j++) setH(i, j, p.sol.h + p.def.p);
+  const last = placed[placed.length - 1];
+  if (last) detach(last);
 }
 
 /* =========================== pointer routing =========================== */
@@ -625,10 +931,16 @@ function undo() {
    just can't be the only thing the teardown depends on.                      */
 addEventListener('pointermove', e => {
   const s = drags.get(e.pointerId);
-  if (s) moveDrag(e, s); else moveNav(e);
+  if (s) { moveDrag(e, s); return; }
+  const h = holds.get(e.pointerId);
+  if (h) {
+    if (Math.hypot(e.clientX - h.x0, e.clientY - h.y0) > HOLD_SLOP) cancelHold(e.pointerId);
+    else { h.x = e.clientX; h.y = e.clientY; }
+  }
+  moveNav(e);
 });
-addEventListener('pointerup',     e => { endDrag(e);   endNav(e); });
-addEventListener('pointercancel', e => { abortDrag(e); endNav(e); });
+addEventListener('pointerup',     e => { tapHold(e);            endDrag(e);   endNav(e); });
+addEventListener('pointercancel', e => { cancelHold(e.pointerId); abortDrag(e); endNav(e); });
 /* alt-tab, or a release outside the window, can swallow the pointerup outright */
 addEventListener('blur', abortAllDrags);
 document.addEventListener('visibilitychange', () => {
@@ -665,11 +977,11 @@ const rotStateEl = document.getElementById('rotState');
 const tap = (id, fn) => document.getElementById(id)
   .addEventListener('pointerdown', e => { e.preventDefault(); fn(); });
 tap('btnRotate', () => { manualRot ^= 1; rotStateEl.textContent = manualRot ? '90°' : '0°'; });
-const flickStateEl = document.getElementById('flickState');
-const toggleFlick = () => { flickOn = !flickOn; flickStateEl.textContent = flickOn ? 'ON' : 'OFF'; };
-tap('btnFlick', toggleFlick);
+/* No button for this any more — throwing earned its place. F still toggles it,
+   for when a flick needs ruling out while chasing something else.           */
+const toggleFlick = () => { flickOn = !flickOn; };
 tap('btnUndo', undo);
-tap('btnClear', () => { while (placed.length) undo(); });
+tap('btnClear', demolish);
 tap('btnHome', () => { view.taz = HOME.az; view.tpol = HOME.pol; view.trad = HOME.rad; });
 tap('btnFull', () => {
   if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
@@ -715,6 +1027,8 @@ function tick(now) {
     p.anim = null;
     land(p);
   }
+  tickHolds(now);
+  stepDemolition(dt);
   stepFlight(dt);
   renderer.render(scene, camera);
   if (++frames >= 30) {
@@ -733,4 +1047,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, flying, heights, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, popSound, boardY, solveAt, launch, stepFlight, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, popSound, boardY, solveAt, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };

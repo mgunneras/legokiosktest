@@ -73,8 +73,8 @@ html,body{
   border-radius:8px; padding:11px 4px; touch-action:none;
 }
 .tool:active{ background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
-#btnRotate, #btnFlick{ grid-column:1 / -1; color:var(--accent); }
-#rotState, #flickState{ color:var(--dim); }
+#btnRotate{ grid-column:1 / -1; color:var(--accent); }
+#rotState{ color:var(--dim); }
 
 /* ---------- stage ---------- */
 #stage{ position:absolute; left:var(--menu-w); right:0; top:0; bottom:0; }
