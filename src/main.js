@@ -448,6 +448,7 @@ let selected = 0;
 
 /* ---------- navigation (stage) ---------- */
 stageEl.addEventListener('pointerdown', e => {
+  unlock();
   try { stageEl.setPointerCapture(e.pointerId); } catch {}
   if (castFrom(e.clientX, e.clientY)) {           // did it land on a brick?
     const hit = ray.intersectObjects(pickList, false)[0];
@@ -1004,6 +1005,9 @@ CATALOG.forEach((def, idx) => {
 
   el.addEventListener('pointerdown', e => {
     e.preventDefault();
+    unlock();          // before the capture below: UNDO and CLEAR are the only
+                       // paths that never capture a pointer, and they are also
+                       // the only ones that reliably start sound on iPad
     try { el.setPointerCapture(e.pointerId); } catch {}
     el.classList.add('press');
     selected = idx;
