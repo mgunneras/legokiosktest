@@ -87,11 +87,20 @@ app's scope (three and `src/main.js` both declare `clamp`). Output is pure
 ASCII — the file carries no `<head>` of its own, so it can't declare a charset,
 and a host that omits one would otherwise render `90°` as `90Â°`.
 
-Currently published (private, shareable from the page's Share menu):
-<https://claude.ai/code/artifact/b864e348-66ba-4c5a-b14b-fe9703ea5f6e>
+Useful for handing someone the whole app as one file, or hosting it anywhere
+that serves a single static page. `dist/` is gitignored — the bundle is a build
+output, not a source, so re-run `npm run bundle` after any source change.
 
-Re-run `npm run bundle` after any source change, then republish that file to the
-same URL. `dist/` is gitignored — the bundle is a build output, not a source.
+## Public build (GitHub Pages)
+
+<https://mgunneras.github.io/legokiosktest/>
+
+Served straight from `main` at the repo root — Pages publishes the same files
+`npm run dev` does, so nothing needs bundling for it. Every path in the app is
+relative, which is what makes it work under a `/legokiosktest/` subpath.
+`.nojekyll` keeps Pages from running the files through Jekyll.
+
+Pushing to `main` redeploys it, usually within a minute.
 
 ## Kiosk deployment notes
 
