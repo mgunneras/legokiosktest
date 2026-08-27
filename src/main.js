@@ -11,6 +11,7 @@ const STUD_R     = 0.30;
 const STUD_H     = 0.225;
 const MAX_STACK  = 30;            // plates
 const GAP        = 0.02;          // visual seam between bricks
+const FALL_G     = 0.024;         // drop acceleration, in fractions of the gap/frame²
 
 /* ---------- palette ---------- */
 const C = {
@@ -128,9 +129,10 @@ function popSound(level) {
 }
 
 /* =========================== impact springs =========================== */
-/* One underdamped spring, reused: `y` is the offset from rest,
-   kick it by shoving `v`. Returns false once it has settled.               */
-function spring(s, k = 0.38, c = 0.24) {
+/* A spring for the board only — bricks never deform, see `land()`. Damped
+   hard enough to read as a knock (one dip, one small rebound) rather than a
+   wobble. `y` is the offset from rest; kick it by shoving `v`.              */
+function spring(s, k = 0.55, c = 0.62) {
   s.v += -k * s.y - c * s.v;
   s.y += s.v;
   return Math.abs(s.y) > 1e-4 || Math.abs(s.v) > 1e-4;
@@ -403,15 +405,15 @@ function place(def, sol, rot, from) {
   hitList.push(g.userData.pickBody);
   for (let i = sol.i0; i < sol.i0 + sol.w; i++)
     for (let j = sol.j0; j < sol.j0 + sol.d; j++) setH(i, j, sol.h + def.p);
-  const p = { g, def, sol, base, anim: { off, sq: null } };
+  const p = { g, def, sol, base, anim: { off, t: 0, v: 0.015 } };
   placed.push(p);
 }
-/* the click: pop, a dip of the whole board, and the brick squashing on impact.
-   Fires when it actually touches down, not when the finger let go.          */
+/* the click. Fires when it actually touches down, not when the finger let go.
+   The brick itself does nothing — ABS doesn't squash, so the energy goes into
+   the board instead, which is what you'd feel through a real baseplate.     */
 function land(p) {
-  p.anim.sq = { y: 0.20, v: 0 };
   const studs = p.sol.w * p.sol.d;
-  boardY.v -= Math.min(0.028 + studs * 0.006, 0.085);   // bigger brick, bigger thud
+  boardY.v -= Math.min(0.066 + studs * 0.014, 0.20);    // bigger brick, bigger thud
   popSound(p.sol.h + p.def.p);
   navigator.vibrate?.(12);
 }
@@ -493,19 +495,18 @@ function tick(now) {
   for (const s of drags.values()) refreshDrag(s);   // plate may have moved under the finger
   if (spring(boardY)) build.position.y = boardY.y;                 // board rebound
   else if (build.position.y) { boardY.y = boardY.v = 0; build.position.y = 0; }
-  for (const p of placed) {
+  for (const p of placed) {                        // dropping out of the hand
     const a = p.anim;
     if (!a) continue;
-    if (a.off) {                                   // still dropping out of the hand
-      a.off.multiplyScalar(0.62);
-      if (a.off.lengthSq() >= 4e-4) { p.g.position.copy(p.base).add(a.off); continue; }
-      a.off = null;
-      land(p);
+    a.v += FALL_G;                                 // accelerate in — a hard thing
+    a.t += a.v;                                    // falling covers most of the
+    if (a.t < 1) {                                 // gap in the last frame or two
+      p.g.position.copy(p.base).addScaledVector(a.off, 1 - a.t);
+      continue;
     }
-    p.g.position.copy(p.base);
-    if (spring(a.sq, 0.44, 0.30)) {                // squash on impact, then rebound
-      p.g.scale.set(1 + a.sq.y * 0.45, 1 - a.sq.y, 1 + a.sq.y * 0.45);
-    } else { p.g.scale.set(1, 1, 1); p.anim = null; }
+    p.g.position.copy(p.base);                     // dead stop: no give, no rebound
+    p.anim = null;
+    land(p);
   }
   renderer.render(scene, camera);
   if (++frames >= 30) {

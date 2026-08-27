@@ -54,17 +54,25 @@ Keyboard: `R` rotate, `Z` undo.
   the plate under a stationary finger updates the landing spot and the snap.
 - The held brick rides the finger's ray at a fixed height, lifted along the
   camera's up axis so it doesn't cover its own landing ghost.
-- **The click.** When a brick finishes falling (~150ms) `land()` fires: a pop,
-  a dip of the whole board, and a squash on the brick itself.
+- **The click.** When a brick finishes falling (~150ms) `land()` fires: a pop
+  and a knock of the whole board.
+  - **Bricks never deform.** ABS is hard — nothing scales a brick group, ever,
+    and the drop *accelerates* (`FALL_G`) instead of easing out, so it covers a
+    fifth of the remaining gap in its last frame and then stops dead. An
+    ease-out curve decelerates into the seat, which is how something soft
+    settles; that plus squash-and-stretch read as rubber.
   - Sound is synthesised in WebAudio — no asset files, nothing to fetch. A
     bandpassed noise tick (the plastic clack) over a triangle blip whose pitch
     rises with the stack height, so a tall build sounds higher than the first
     course. Browsers only allow audio to start inside a gesture, so the context
     is armed on the kiosk's first touch.
-  - `build` is a group holding the baseplate *and* every placed brick, so the
-    bounce moves the model as one. It's a damped spring on Y only — grid maths
-    lives in world X/Z and is untouched. ~4px dip for a 2x4, gone in ~370ms.
-  - The brick squashes to 0.89 and rebounds to 1.10 on its own spring.
+  - The impact goes into the board instead, which is what you'd feel through a
+    real baseplate. `build` is a group holding the baseplate *and* every placed
+    brick, so it moves the model as one — a rigid translation, no deformation.
+    Damped spring on Y only; grid maths lives in world X/Z and is untouched.
+  - That spring is tuned as a *knock*, not a wobble: ~3.4px dip for a 2x4, a
+    rebound 17% of the dip, over in 100ms. Slacken the damping and the board
+    oscillates half a dozen times and the whole thing goes rubbery again.
   - `navigator.vibrate(12)` on hardware that has it.
 - `window.__kiosk` exposes state for on-site debugging.
 
