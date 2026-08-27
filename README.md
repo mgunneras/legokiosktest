@@ -261,6 +261,22 @@ Two asks, both in the tray footer:
   is a task it is good at, and it leaves the building — the fun part — with the
   person. The placement plumbing is in the history if it is ever wanted back.
 
+  Hints are **one running conversation**, so it builds on what it already said
+  rather than starting cold. Two things keep that cheap: only the turn actually
+  being sent carries the board, and what is kept in the history is a one-line
+  note of what the board looked like at the time — otherwise every past turn
+  would drag a whole map along behind it. Four exchanges are kept, then the
+  oldest falls off, and CLEAR ends the conversation, since otherwise it carries
+  on discussing a build that no longer exists.
+
+  It is also told **what changed since it last spoke** — "since your last idea
+  they have added 2 blue" — which is the most interesting thing that can have
+  happened between two hints and costs nothing to work out locally. That is what
+  lets it notice you took its advice.
+
+  A failed call commits nothing, so a rate limit or a dropped connection cannot
+  leave a dangling user turn and break the alternation on the next ask.
+
 Neither ask can touch the board: both only ever produce a sentence, so there is
 no path at all from a model reply into the grid.
 

@@ -1162,7 +1162,11 @@ tap('btnPage', () => { page = (page + 1) % PAGES.length; renderPalette(); });
    for when a flick needs ruling out while chasing something else.           */
 const toggleFlick = () => { flickOn = !flickOn; };
 tap('btnUndo', undo);
-tap('btnClear', demolish);
+tap('btnClear', () => {
+  demolish();
+  chat.length = 0;                       // new build, new conversation
+  lastTally = null;
+});
 tap('btnHome', () => { view.taz = HOME.az; view.tpol = HOME.pol; view.trad = HOME.rad; });
 tap('btnFull', () => {
   if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
@@ -1303,9 +1307,56 @@ Rules:
 
 Reply with the sentences and nothing else.`;
 
+/* The hints are one running conversation, so it can build on what it already
+   said instead of starting cold each time. Two things keep that cheap: only the
+   turn being sent carries the full board, and what is kept in the history is a
+   one-line note of what the board looked like then. Otherwise every past turn
+   would drag a whole map along with it. */
+const chat = [];
+const CHAT_TURNS = 8;                   // four exchanges, then the oldest falls off
+let lastTally = null;
+
+function tallyByColour() {
+  const t = {};
+  for (const p of placed) { const c = COLOUR_NAME[p.def.c]; t[c] = (t[c] || 0) + 1; }
+  return t;
+}
+const boardLine = () => {
+  const bits = Object.entries(tallyByColour()).map(([c, n]) => `${n} ${c}`).join(', ');
+  return placed.length ? `[what I was looking at: ${bits}]` : '[what I was looking at: an empty board]';
+};
+/* Whether they took the advice is the most interesting thing that can have
+   happened between two hints, and it is cheap to work out here. */
+function sinceLast() {
+  if (!lastTally) return '';
+  const now = tallyByColour(), added = [];
+  let removed = 0;
+  for (const [c, n] of Object.entries(now)) {
+    const d = n - (lastTally[c] || 0);
+    if (d > 0) added.push(`${d} ${c}`);
+  }
+  for (const [c, n] of Object.entries(lastTally)) removed += Math.max(0, n - (now[c] || 0));
+  if (!added.length && !removed) return 'They have not put anything down since you last spoke.';
+  const bits = [];
+  if (added.length) bits.push(`added ${added.join(', ')}`);
+  if (removed) bits.push(`took away ${removed}`);
+  return `Since your last idea they have ${bits.join(' and ')}.`;
+}
+
+const followPrompt = (scene, since) => `Here is the board now.
+
+${scene}
+
+${since}
+
+Give them the next idea, in the same voice as before. Carry on from what you already said rather than repeating it: if they took your suggestion, be pleased and take the story one step further; if they went their own way, go with theirs.
+
+Same rules: at most two short sentences and 25 words, warm and never sarcastic, buildable out of simple coloured blocks with no lettering or fine detail, and never mention the board itself. Reply with the sentences and nothing else.`;
+
 /* Key goes in a header, never the query string — URLs get logged and shared. */
 async function callGemini(prompt, schema, noThink) {
-  const body = { contents: [{ role: 'user', parts: [{ text: prompt }] }] };
+  const body = { contents: Array.isArray(prompt) ? prompt
+                                                 : [{ role: 'user', parts: [{ text: prompt }] }] };
   if (schema) body.generationConfig = { responseMimeType: 'application/json', responseSchema: schema };
   // 2.5 bills thinking as output tokens, and a fourteen-word answer needs none.
   // Only the flash models accept a zero budget, so the guard stays narrow —
@@ -1344,7 +1395,7 @@ async function listModels(key) {
 const bubbleEl = document.getElementById('bubble');
 const bubbleTextEl = document.getElementById('bubbleText');
 let bubbleTimer = 0;
-function say(text, hold = 5000, thinking = false) {
+function say(text, hold = 10000, thinking = false) {
   clearTimeout(bubbleTimer);
   bubbleTextEl.textContent = text;
   bubbleEl.classList.toggle('thinking', thinking);
@@ -1373,8 +1424,17 @@ tap('btnDescribe', () => ask('looking at your build...', async () => {
 }));
 
 tap('btnHint', () => ask('thinking of something...', async () => {
-  const text = await callGemini(hintPrompt(sceneSummary(false)), null, true);
-  say(text.replace(/^["'\s]+|["'\s]+$/g, ''), 9000);   // longer: it is a sentence to act on
+  const scene = sceneSummary(false);
+  const asked = chat.length ? followPrompt(scene, sinceLast()) : hintPrompt(scene);
+  // Send the live turn without committing it: a failed call must not leave a
+  // dangling user turn behind, which would break the alternation next time.
+  const text = await callGemini([...chat, { role:'user', parts:[{ text: asked }] }], null, true);
+  const said = text.replace(/^["'\s]+|["'\s]+$/g, '');
+  chat.push({ role:'user',  parts:[{ text: boardLine() }] },   // kept small on purpose
+             { role:'model', parts:[{ text: said }] });
+  while (chat.length > CHAT_TURNS) chat.shift();
+  lastTally = tallyByColour();
+  say(said, 18000);                      // longest: it is a sentence to act on
 }));
 
 /* ---------- key + model panel ---------- */
@@ -1510,4 +1570,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, chat, sinceLast, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
