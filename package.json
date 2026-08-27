@@ -7,7 +7,8 @@
   "main": "electron/main.js",
   "scripts": {
     "dev": "node electron/server.js",
-    "kiosk": "electron ."
+    "kiosk": "electron .",
+    "bundle": "node tools/bundle.js"
   },
   "devDependencies": { "electron": "^32.0.0" }
 }

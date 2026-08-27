@@ -68,6 +68,23 @@ Keyboard: `R` rotate, `Z` undo.
   - `navigator.vibrate(12)` on hardware that has it.
 - `window.__kiosk` exposes state for on-site debugging.
 
+## Hosted build (one shareable file)
+
+    npm run bundle          # -> dist/brick-kiosk.html   (~1.2 MB, self-contained)
+
+`tools/bundle.js` flattens the app into a single file: three.js is wrapped in an
+IIFE and its final `export { ... }` rewritten to `return { ... }`, which both
+gives us a `THREE` namespace and keeps its ~1500 top-level bindings out of the
+app's scope (three and `src/main.js` both declare `clamp`). Output is pure
+ASCII — the file carries no `<head>` of its own, so it can't declare a charset,
+and a host that omits one would otherwise render `90°` as `90Â°`.
+
+Currently published (private, shareable from the page's Share menu):
+<https://claude.ai/code/artifact/b864e348-66ba-4c5a-b14b-fe9703ea5f6e>
+
+Re-run `npm run bundle` after any source change, then republish that file to the
+same URL. `dist/` is gitignored — the bundle is a build output, not a source.
+
 ## Kiosk deployment notes
 
 - **Target: Chromium/Electron.** Only mainstream runtime with real multi-touch
