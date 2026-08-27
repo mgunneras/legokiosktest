@@ -1294,16 +1294,20 @@ const hintPrompt = scene => `Someone is building a picture out of coloured plast
 
 ${scene}
 
-Give them one idea for what to add next.
+Give them the next small thing to add.
 
-Say what you think it is, then suggest one thing that plays off it: a mouse for the cat to chase, a boat for the lake, a chimney for the roof, a friend to stand beside it. Look at where the board is still empty and point roughly there - "along the top", "just to its left", "in the near corner".
+Say what you can see so far, then name one small addition that carries it a step further. The next feature, not the next subject: two dots that read as eyes want a nose under them, and then a mouth. A wall wants a door. A trunk wants a leafy top. A roofline wants a chimney.
+
+Keep the ask small:
+- One to three pieces of work, and no more. This is a blunt tool and every piece is placed by hand, so a whole new animal, building or scene is far too much to ask for.
+- Grow what is already there rather than starting something else somewhere else. Suggest something brand new only when the board is nearly bare.
+- Point roughly where it goes: "just under them", "along the top of it", "one either side".
 
 Rules:
 - Two short sentences at most, 25 words in total.
-- Warm and playful. Be pleased with what is already there. Never sarcastic, and never say it looks unfinished, empty or wrong.
-- It has to be buildable out of simple coloured blocks at this size: no lettering, no faces, no small detail.
+- Warm and playful. Be pleased with what is there. Never sarcastic, and never call it unfinished, empty or wrong.
+- Buildable out of a few coloured blocks: no lettering, no fine detail.
 - Never mention LEGO, bricks, studs, cells, coordinates or the board itself.
-- If almost nothing has been built, suggest one simple thing worth starting.
 
 Reply with the sentences and nothing else.`;
 
@@ -1349,9 +1353,9 @@ ${scene}
 
 ${since}
 
-Give them the next idea, in the same voice as before. Carry on from what you already said rather than repeating it: if they took your suggestion, be pleased and take the story one step further; if they went their own way, go with theirs.
+Give them the next small thing, in the same voice as before. Carry on from what you already said rather than repeating it: if they took your suggestion, be pleased and name the next small feature after it; if they went their own way, go with theirs.
 
-Same rules: at most two short sentences and 25 words, warm and never sarcastic, buildable out of simple coloured blocks with no lettering or fine detail, and never mention the board itself. Reply with the sentences and nothing else.`;
+Same rules, and the small one especially: one to three pieces of work, growing what is already there rather than starting a new subject beside it. At most two short sentences and 25 words, warm and never sarcastic, buildable out of a few coloured blocks with no lettering or fine detail, and never mention the board itself. Reply with the sentences and nothing else.`;
 
 /* Key goes in a header, never the query string — URLs get logged and shared. */
 async function callGemini(prompt, schema, noThink) {

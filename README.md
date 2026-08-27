@@ -250,9 +250,19 @@ Two asks, both in the tray footer:
 - **WHAT IS THIS?** sends a semantic snapshot of the board and asks for one
   sentence saying what it depicts. The reply lands in a bubble at the top of the
   screen for five seconds.
-- **WHAT NEXT?** sends the same snapshot and asks for one idea: what it thinks
-  the thing is, then one addition that plays off it — a mouse for the cat, a boat
-  for the lake. It answers in words, not coordinates, and the person places it.
+- **WHAT NEXT?** sends the same snapshot and asks for *the next small thing*:
+  what it can see so far, then one addition that carries it a step further. It
+  answers in words, not coordinates, and the person places it.
+
+  The ambition has to be held down explicitly, and the examples in the prompt do
+  most of that work. An earlier version offered "a mouse for the cat to chase, a
+  boat for the lake, a friend to stand beside it" — three new *subjects* — and it
+  duly answered two black dots with "draw a rabbit next to it". The examples are
+  now all increments (eyes want a nose, a wall wants a door, a roofline wants a
+  chimney), the ask is capped at one to three pieces, the prompt says outright
+  that this is a blunt tool with every piece placed by hand, and a brand new
+  subject is only allowed on a nearly bare board. A rule forbidding "faces" also
+  had to go: it was quietly fighting exactly the suggestion that was wanted.
 
   This replaced a version that asked Gemini to *place* up to 30 pieces itself.
   That was the wrong job to give it. Even with the geometry described exactly and
