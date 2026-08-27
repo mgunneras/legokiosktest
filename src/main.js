@@ -1060,6 +1060,39 @@ const saveCfg = () => { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg))
 const COLOUR_NAME = {};
 for (const [n, hex] of Object.entries(C)) COLOUR_NAME[hex] = n;
 const pieceName = d => `${COLOUR_NAME[d.c]} ${d.d}x${d.w} ${d.p === 1 ? 'plate' : 'brick'}`;
+const CODE = { red:'rd', blue:'bl', yellow:'yl', green:'gn', white:'wh', grey:'gy',
+               black:'bk', orange:'or', tan:'tn', lime:'lm', azure:'az', purple:'pu' };
+
+/* The single most useful thing to hand over: what the board actually looks like
+   from above. A list of pieces describes the parts; this describes the picture,
+   which is what is being asked about. Overhangs resolve to whatever is on top,
+   exactly as an eye would see them. */
+function topDown() {
+  const colour = new Array(GRID * GRID).fill(null);
+  const top = new Int16Array(GRID * GRID);
+  for (const p of placed) {
+    const s = p.sol, t = s.h + p.def.p;
+    for (let i = s.i0; i < s.i0 + s.w; i++)
+      for (let j = s.j0; j < s.j0 + s.d; j++) {
+        const n = j * GRID + i;
+        if (t >= top[n]) { top[n] = t; colour[n] = COLOUR_NAME[p.def.c]; }
+      }
+  }
+  const pad = v => String(v).padStart(2, ' ');
+  const head = '     ' + Array.from({ length: GRID }, (_, i) => pad(i)).join(' ') + '   <- x';
+  const paint = [head], relief = [head];
+  for (let j = 0; j < GRID; j++) {
+    const cells = [], highs = [];
+    for (let i = 0; i < GRID; i++) {
+      const n = j * GRID + i;
+      cells.push(colour[n] ? CODE[colour[n]] : '..');
+      highs.push(top[n] ? pad(top[n]) : ' .');
+    }
+    paint.push(`z ${pad(j)} ` + cells.join(' '));
+    relief.push(`z ${pad(j)} ` + highs.join(' '));
+  }
+  return { paint: paint.join('\n'), relief: relief.join('\n') };
+}
 
 /* The model cannot see the board, so this has to carry everything a picture
    would: not just an inventory, but where things sit, how high they reach and
@@ -1067,9 +1100,19 @@ const pieceName = d => `${COLOUR_NAME[d.c]} ${d.d}x${d.w} ${d.p === 1 ? 'plate' 
    list — they are what let it reason about shape instead of parts. */
 function sceneSummary() {
   const out = [];
-  out.push(`BOARD: ${GRID}x${GRID} studs. Coordinates are stud indices: x runs 0-${GRID - 1} ` +
-           `left to right, z runs 0-${GRID - 1} front to back.`);
-  out.push('Heights are counted in plates: a plate is 1 tall, a standard brick is 3.');
+  out.push(`BOARD: ${GRID}x${GRID} studs, seen from directly above. x runs 0-${GRID - 1} ` +
+           `left to right, z runs 0-${GRID - 1} top to bottom of the map below.`);
+  out.push('');
+  const { paint, relief } = topDown();
+  out.push('THE PICTURE AS DRAWN, looking straight down. Each cell is one stud;');
+  out.push('".." is bare baseplate. Two-letter colour codes:');
+  out.push('  rd red  bl blue  yl yellow  gn green  wh white  gy grey');
+  out.push('  bk black  or orange  tn tan  lm lime  az azure  pu purple');
+  out.push(paint);
+  out.push('');
+  out.push('RELIEF: how high each cell stands, in plates. A plate is 1, a standard brick is 3.');
+  out.push('Most of a drawing sits flat at 3; a higher number is something raised above the rest.');
+  out.push(relief);
   out.push('');
   if (!placed.length) {
     out.push('THE BOARD IS EMPTY. Nothing has been built yet.');
@@ -1100,30 +1143,34 @@ function sceneSummary() {
   return out.join('\n');
 }
 
-const describePrompt = scene => `Someone is building on a LEGO baseplate. Here is exactly what is on it.
+const describePrompt = scene => `Someone has been drawing on a 16x16 board with coloured plastic pieces. You are looking straight down at it.
 
 ${scene}
 
-Tell them what it looks like it depicts.
+Tell them what the picture shows.
 
-Read it the way you would read a picture rather than an inventory: where pieces sit, how high they reach, and what colour they are all carry meaning. A band of blue along one edge could be water. A tall grey stack could be a tower. A flat green spread could be a field. Colour is a strong hint; height and grouping are stronger.
+Read the colour map the way you would read pixel art or a painted sign, not a sculpture: shapes made of adjacent same-coloured cells, where they sit on the board, and what they add up to. A blue band across the bottom rows is water. A green mass is grass or a canopy. A brown or tan column under it is a trunk. Read the relief map as a second, weaker signal — raised cells are the parts standing proud of the picture, not a separate building.
 
 Rules:
 - One sentence, 14 words maximum.
 - Commit to a single reading. No hedging, no listing possibilities, no "either ... or".
-- Never mention LEGO, bricks, studs, plates, coordinates or the baseplate.
-- If almost nothing has been built, say so with some charm instead of inventing a scene.
+- Never mention LEGO, bricks, studs, plates, cells, coordinates or the board.
+- If the board is nearly bare, say so with some charm instead of inventing a scene.
 
 Reply with the sentence and nothing else.`;
 
 const FINISH_MAX = 30;
-const finishPrompt = scene => `Someone is part-way through building on a LEGO baseplate. Here is exactly what is on it.
+const finishPrompt = scene => `Someone is part-way through a drawing made from coloured plastic pieces on a 16x16 board, seen from directly above. Here is exactly what is on it.
 
 ${scene}
 
-Finish it for them.
+Finish the picture.
 
-Decide first what it is, then work out what is missing and give the placements that would complete it. Treat it as a build, not a shopping list: walls want closing, a roof wants walls under it, a tree wants a trunk before a canopy, and symmetry that has been started wants finishing. Something already at the edge of the board must not grow off it.
+Decide first what it shows, then work out what is missing and give the placements that complete it.
+
+Work in the top-down view. You are finishing a drawing on a 16x16 grid, not engineering a model: extend bands of colour to the edges where they clearly want to reach, fill regions that are obviously meant to be solid, close outlines, complete symmetry that has been started, and add the few marks that make the subject unmistakable. Think in areas of colour, not in individual pieces — choose the largest piece that fits the area you are filling.
+
+Height is emphasis, not construction. Keep nearly everything flat at level 0 and only raise something where it genuinely stands above the rest of the picture. A drawing that is mostly one layer will read far better than a lumpy one.
 
 Constraints, enforced on my side — any step that breaks one is silently dropped, so a careless plan comes out full of holes:
 - At most ${FINISH_MAX} steps. Fewer is fine and usually better: stop when it reads as finished rather than filling the board.

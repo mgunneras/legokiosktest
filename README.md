@@ -249,12 +249,23 @@ through the same `solveAt` a dragged brick uses. A step that still doesn't fit i
 dropped and the rest carry on, which the prompt says out loud so a careless plan
 visibly costs the model pieces.
 
-`sceneSummary()` is the interesting half. The model cannot see the board, so the
-snapshot carries what a picture would: every piece with its colour, footprint and
-height, then the derived lines that let it reason about shape rather than parts —
-overall extent, tallest point, colour tally, and what is set aside on the desk.
-The prompt tells it to read position, height and colour as *meaning* (a blue band
-low along one edge is probably water) and to commit to one reading.
+`sceneSummary()` is the interesting half, and it is built around one idea: a
+16x16 board of coloured pieces is far closer to **pixel art than architecture**,
+so hand over the picture, not the parts list.
+
+It renders two top-down grids. The first is what the board actually looks like
+from above — one cell per stud, two-letter colour codes, `..` for bare plate,
+with overhangs resolving to whatever is on top exactly as an eye would see them.
+The second is relief: how high each cell stands, so height reads as emphasis
+laid over the drawing rather than as a separate structure. The piece list and
+the derived extent/colour tally follow for precision.
+
+Both prompts are framed to match: describe reads the map like pixel art or a
+painted sign, and finish completes a *drawing* — extend bands of colour to the
+edges, fill regions meant to be solid, close outlines, complete symmetry — with
+an explicit instruction to keep nearly everything flat and only raise what
+genuinely stands proud. Aiming at a flat picture also happens to be the easier
+thing to get right, so the plans come back cleaner.
 
 **The key lives in `localStorage`.** That is the normal shape for a client-only
 prototype and it is what makes this work with no backend — but be clear-eyed:
