@@ -41,12 +41,21 @@ Keyboard: `R` rotate, `Z` undo.
 
 - `src/main.js` — everything: scene, camera rig, pointer routing, snapping.
 - 1 world unit = 1 stud pitch (8 mm). Plate = 0.4u, brick = 1.2u.
-- **Shape is only ever skin.** Slopes, curves and round parts are a 2D side
-  profile extruded across the piece's depth — four points for a slope, three
-  and an arc for a curve — cached per part. Footprint and height are unchanged
-  by shape, so placement, stacking, the grid and the physics never learn that
-  any of it exists. Studs are omitted where there is no full-height top to put
-  them on. The angles are geometry rather than marketing: a brick-height fall
+- **Shape is skin, except where it isn't.** Slopes, curves and round parts are a
+  2D side profile extruded across the piece's depth — four points for a slope,
+  three and an arc for a curve — cached per part. Footprint and height are
+  unchanged, so placement, stacking and physics stay in the grid.
+  But height alone cannot describe a slope: the angled half stands as tall as
+  the rest and has no studs on it. So there is a second map, `matable`, one flag
+  per column, written by `stamp()` alongside `heights`. A piece rests on the
+  columns that reach `h`, and **at least one of them must carry studs** — one
+  stud holds a brick, so a piece may grip a slope's flat half and overhang its
+  angled half, but it may not rest on the angled face alone. Round tiles have no
+  studs anywhere and take nothing.
+- **Rotation is a real quarter turn**, not a swap of width and depth. For a box
+  those are the same thing; for a wedge they are different solids. So a shaped
+  part is modelled facing one way and turned into place, and `stamp()` maps the
+  piece's own columns to world columns accordingly. The angles are geometry rather than marketing: a brick-height fall
   across one stud is ~50°, which is the element everyone calls a 45; across two
   studs it is ~31°, the one called a 33.
 - The tray pages, but `CATALOG` stays whole behind it, so Gemini's piece indices

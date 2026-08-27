@@ -88,8 +88,8 @@ const CATALOG = [
   { id:'c6091',  w:2, d:1, p:4, c:C.purple, page:2, shape:'curve', flat:0, part:'6091',  label:'curved top' },
   { id:'r3062',  w:1, d:1, p:3, c:C.orange, page:2, shape:'round', part:'3062',  label:'round 1x1' },
   { id:'r3941',  w:2, d:2, p:3, c:C.lime,   page:2, shape:'round', part:'3941',  label:'round 2x2' },
-  { id:'r98138', w:1, d:1, p:1, c:C.black,  page:2, shape:'round', part:'98138', label:'round tile 1x1' },
-  { id:'r4150',  w:2, d:2, p:1, c:C.tan,    page:2, shape:'round', part:'4150',  label:'round tile 2x2' },
+  { id:'r98138', w:1, d:1, p:1, c:C.black,  page:2, shape:'round', tile:true, part:'98138', label:'round tile 1x1' },
+  { id:'r4150',  w:2, d:2, p:1, c:C.tan,    page:2, shape:'round', tile:true, part:'4150',  label:'round tile 2x2' },
 ];
 const PAGE_NAMES = ['BRICKS', 'SLOPES', 'CURVES'];
 const PAGES = PAGE_NAMES.map((_, n) => CATALOG.filter(d => d.page === n));
@@ -369,8 +369,10 @@ const geoFor = def => {
   if (!geoCache.has(def.id)) geoCache.set(def.id, shapeGeo(def));
   return geoCache.get(def.id);
 };
-/* Studs only where there is full-height top to put them on. */
+/* Studs only where there is full-height top to put them on — which is also
+   exactly where another piece may later rest. A tile has none anywhere. */
 function studAt(def, i) {
+  if (def.tile) return false;
   if (def.shape === 'slope') return i >= def.w - def.run;
   if (def.shape === 'curve') return i >= def.w - (def.flat ?? 1);
   return true;                                  // plain, inverted and round: all of it
@@ -457,8 +459,28 @@ const pickList = [];                              // what a finger can press on
 const hitList = [];                               // meshes eligible for raycast
 plateGroup.traverse(o => { if (o.isMesh && o.userData.isBase) hitList.push(o); });
 
+/* Height alone cannot describe a slope: the angled half of one stands as tall as
+   the rest but has no studs on it, so nothing may sit there. `matable` is that
+   second fact, per column — 1 where the top of the stack can take a piece. */
+const matable = new Uint8Array(GRID * GRID).fill(1);
 const H = (i, j) => heights[j * GRID + i];
 const setH = (i, j, v) => { heights[j * GRID + i] = v; };
+const canMate = (i, j) => matable[j * GRID + i] === 1;
+
+/* Write a piece into both maps. Rotation is a real quarter turn of the piece,
+   not a swap of its width and depth — for a wedge those are different solids —
+   so the piece's own column `li` lands at a different world column each way. */
+function stamp(def, sol, rot, top) {
+  for (let li = 0; li < def.w; li++) {
+    const studs = studAt(def, li) ? 1 : 0;
+    for (let lj = 0; lj < def.d; lj++) {
+      const wi = rot ? sol.i0 + lj : sol.i0 + li;
+      const wj = rot ? sol.j0 + (def.w - 1 - li) : sol.j0 + lj;
+      setH(wi, wj, top);
+      matable[wj * GRID + wi] = studs;
+    }
+  }
+}
 const drop1 = (arr, v) => { const i = arr.indexOf(v); if (i >= 0) arr.splice(i, 1); };
 
 /* Replayed in placement order, because each brick's `sol.h` was resolved against
@@ -466,9 +488,8 @@ const drop1 = (arr, v) => { const i = arr.indexOf(v); if (i >= 0) arr.splice(i, 
    nothing can be removed while something rests on it — see `isFree`.          */
 function rebuildHeights() {
   heights.fill(0);
-  for (const p of placed)
-    for (let i = p.sol.i0; i < p.sol.i0 + p.sol.w; i++)
-      for (let j = p.sol.j0; j < p.sol.j0 + p.sol.d; j++) setH(i, j, p.sol.h + p.def.p);
+  matable.fill(1);                       // bare baseplate is studded everywhere
+  for (const p of placed) stamp(p.def, p.sol, p.rot, p.sol.h + p.def.p);
 }
 /* Nothing on top: every column under the footprint tops out at this brick. */
 function isFree(rec) {
@@ -609,7 +630,19 @@ function solveAt(px, pz, def, rot) {
   let h = 0;
   for (let i = i0; i < i0 + w; i++)
     for (let j = j0; j < j0 + d; j++) h = Math.max(h, H(i, j));
-  const ok = h + def.p <= MAX_STACK;
+  let ok = h + def.p <= MAX_STACK;
+  // It comes to rest on the columns that actually reach `h`, and at least one of
+  // those has to carry studs. One stud is enough to hold a brick, so a piece may
+  // grip the flat half of a slope and overhang the angled half — the same
+  // overhang allowed anywhere else. What it may not do is rest on the angled
+  // face alone, which is what a slope with nothing flat under the piece means.
+  if (ok && h > 0) {
+    let grip = false;
+    for (let i = i0; i < i0 + w && !grip; i++)
+      for (let j = j0; j < j0 + d; j++)
+        if (H(i, j) === h && canMate(i, j)) { grip = true; break; }
+    ok = grip;
+  }
   return { i0, j0, w, d, h, ok };
 }
 /* ...and where does the brick under `ray` land? null if it misses the build */
@@ -771,7 +804,8 @@ function refreshDrag(s) {
   s.held.rotation.y = s.yaw;
   if (rot !== s.rot) {                              // snapped to the other grid axis
     if (s.ghost) build.remove(s.ghost);
-    s.ghost = buildBrick(rot ? { ...s.def, w:s.def.d, d:s.def.w } : s.def, true);
+    s.ghost = buildBrick(s.def, true);
+    s.ghost.rotation.y = rot * (Math.PI / 2);
     build.add(s.ghost);                             // sticks to the board, bounce and all
     s.rot = rot;
   }
@@ -845,21 +879,27 @@ function abortAllDrags() {
 function commit(g, def, sol, rot) {
   const base = new THREE.Vector3(placeX(sol.i0, sol.w), sol.h * PLATE, placeX(sol.j0, sol.d));
   g.position.copy(base);
-  g.rotation.set(0, 0, 0);
+  g.rotation.set(0, rot * (Math.PI / 2), 0);
   build.add(g);
   hitList.push(g.userData.pickBody);
-  for (let i = sol.i0; i < sol.i0 + sol.w; i++)
-    for (let j = sol.j0; j < sol.j0 + sol.d; j++) setH(i, j, sol.h + def.p);
+  stamp(def, sol, rot, sol.h + def.p);
   const p = { g, def, sol, rot, base, anim: null, kind: 'placed' };
   g.userData.pickBody.userData.owner = p;
   pickList.push(g.userData.pickBody);
   placed.push(p);
   return p;
 }
-const turned = (def, rot) => rot ? { ...def, w:def.d, d:def.w } : def;
+/* Every shaped piece is modelled facing one way and turned into place. Swapping
+   width for depth is only the same thing for a box; for a wedge or a curve it
+   builds a different solid entirely. */
+const oriented = (def, rot) => {
+  const g = buildBrick(def);
+  g.rotation.y = rot * (Math.PI / 2);
+  return g;
+};
 
 function place(def, sol, rot, from) {
-  const p = commit(buildBrick(turned(def, rot)), def, sol, rot);
+  const p = commit(oriented(def, rot), def, sol, rot);
   // fall into the socket from wherever the hand released it (`from` is world,
   // `base` is board-local — they differ by however far the board is bouncing)
   const off = from ? from.clone().sub(p.base) : new THREE.Vector3(0, 0.9, 0);
@@ -880,7 +920,7 @@ function land(p) {
 /* Whether a throw sticks is decided here, at launch, not on arrival — a dud is
    committed to before it ever touches down, so it tumbles the whole way in. */
 function launch(def, rot, from, vel) {
-  const g = buildBrick(turned(def, rot));
+  const g = oriented(def, rot);
   g.position.copy(from);
   g.position.y -= build.position.y;             // world -> board-local
   build.add(g);
@@ -914,7 +954,7 @@ function botch(f, top, kick = ESCAPE, lift = 18) {
 /* Released off the build: it doesn't vanish, it lands on the desk and stays
    there, at whatever angle it came to rest — no grid, no stack, still yours. */
 function discard(def, rot, from, vel) {
-  const g = buildBrick(turned(def, rot));
+  const g = oriented(def, rot);
   g.position.copy(from);
   g.position.y -= build.position.y;
   build.add(g);
@@ -1255,6 +1295,8 @@ Constraints, enforced on my side — any step that breaks one is silently droppe
 - "piece" is an index into the tray list above. Shape and colour are fixed together; you cannot recolour a piece.
 - "x" and "z" are the stud coordinates of the piece's lowest corner. The whole piece must fit on the board, so x + width - 1 <= ${GRID - 1} and z + depth - 1 <= ${GRID - 1}.
 - "rotated" true swaps that piece's width and depth.
+- A slope's angled face is not a surface: nothing can rest on it, only on the
+  flat studded part. Same for the round tiles, which have no studs at all.
 - "level" is the height in plates the piece rests at: 0 is directly on the baseplate, 3 is on top of one standard brick, 6 on top of two, and so on. A piece rests on whatever is highest beneath its footprint, so anything above level 0 needs something under it at that spot.
 - I lay your steps in ascending "level" order, so supports go down before whatever sits on them. Get the levels right and the build assembles itself correctly.
 
@@ -1554,4 +1596,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, audioState, buildQueue, stepBuild, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, buildQueue, stepBuild, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
