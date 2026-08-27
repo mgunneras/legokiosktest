@@ -87,6 +87,18 @@ Keyboard: `R` rotate, `Z` undo.
   - Text tokens are picked to clear WCAG AA at the sizes they're actually used:
     `--dim` is set for 10px labels on `--panel-2`, which is stricter than the
     same colour on white.
+- **Pointer routing is window-level, deliberately.** `pointermove`/`up`/`cancel`
+  are handled on `window` and dispatched by `pointerId`, not bound to the
+  element a drag started on. An element only sees a pointer while its capture
+  holds, and `setPointerCapture` is allowed to fail — so a lost or never-granted
+  capture used to leave a session with no path to its teardown: the tile stayed
+  stuck to the palette and the held brick hung over the plate for good. Worse,
+  ids are reused (a mouse is always id 1), so the next press overwrote the
+  session and orphaned that pair with nothing referencing them.
+  Captures are still taken — they keep events coming when the pointer leaves the
+  window — they just aren't what the teardown depends on. Every exit funnels
+  through `closeDrag()`; `blur` and `visibilitychange` abort live drags, since
+  alt-tab can swallow the `pointerup` outright, and a cancel drops nothing.
 - `window.__kiosk` exposes state for on-site debugging.
 
 ## Hosted build (one shareable file)

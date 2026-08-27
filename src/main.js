@@ -250,7 +250,7 @@ stageEl.addEventListener('pointerdown', e => {
   nav.set(e.pointerId, { x:e.clientX, y:e.clientY });
   if (nav.size === 2) startPinch();
 });
-stageEl.addEventListener('pointermove', e => {
+function moveNav(e) {
   const p = nav.get(e.pointerId);
   if (!p) return;
   const dx = e.clientX - p.x, dy = e.clientY - p.y;
@@ -266,7 +266,7 @@ stageEl.addEventListener('pointermove', e => {
     view.trad = clamp(pinch.rad * (pinch.dist / Math.max(dist, 1)), RAD_MIN, RAD_MAX);
     view.taz  = pinch.az - (mx - pinch.mx) * 0.004;
   }
-});
+}
 function endNav(e) {
   if (!nav.delete(e.pointerId)) return;
   pinch = null;
@@ -276,8 +276,7 @@ function startPinch() {
   const [a, b] = [...nav.values()];
   pinch = { dist: Math.max(Math.hypot(a.x - b.x, a.y - b.y), 1), rad: view.trad, mx: (a.x + b.x) / 2, az: view.taz };
 }
-stageEl.addEventListener('pointerup', endNav);
-stageEl.addEventListener('pointercancel', endNav);
+
 
 /* =========================== placement solving =========================== */
 const ray = new THREE.Raycaster();
@@ -334,11 +333,17 @@ function gridRot(s) {
 }
 
 function beginDrag(e, def, srcEl) {
+  // A pointer id gets reused — a mouse is always id 1 — so a session that was
+  // somehow left open would be overwritten here and orphan its tile and brick
+  // in the scene with nothing left holding a reference to them.
+  const stale = drags.get(e.pointerId);
+  if (stale) closeDrag(stale, e.pointerId);
+
   const tile = document.createElement('div');      // stand-in while over the menu
   tile.className = 'tile';
   tile.appendChild(srcEl.querySelector('.swatch').cloneNode(true));
   document.getElementById('chips').appendChild(tile);
-  const s = { def, tile, x:e.clientX, y:e.clientY, az0:view.az,
+  const s = { def, tile, src:srcEl, x:e.clientX, y:e.clientY, az0:view.az,
               held:null, ghost:null, rot:-1, sol:null };
   drags.set(e.pointerId, s);
   refreshDrag(s);
@@ -390,14 +395,27 @@ function refreshDrag(s) {
   const tint = sol.ok ? null : '#ff3b3b';
   s.ghost.traverse(o => { if (o.isMesh) o.material = brickMat(tint || s.def.c, true); });
 }
-function endDrag(e) {
-  const s = drags.get(e.pointerId);
-  if (!s) return;
-  drags.delete(e.pointerId);
+/* Every way a session can end funnels through here, so nothing it owns — the
+   menu tile, the held brick, the ghost — can outlive it.                     */
+function closeDrag(s, id) {
+  drags.delete(id);
   if (s.ghost) build.remove(s.ghost);
   if (s.held)  scene.remove(s.held);
   s.tile.remove();
+  s.src.classList.remove('press');
+}
+function endDrag(e) {                       // released: drop it if it fits
+  const s = drags.get(e.pointerId);
+  if (!s) return;
+  closeDrag(s, e.pointerId);
   if (s.sol && s.sol.ok) place(s.def, s.sol, s.rot, s.held.visible ? s.held.position : null);
+}
+function abortDrag(e) {                     // cancelled, not released: drop nothing
+  const s = drags.get(e.pointerId);
+  if (s) closeDrag(s, e.pointerId);
+}
+function abortAllDrags() {
+  for (const [id, s] of drags) closeDrag(s, id);
 }
 function place(def, sol, rot, from) {
   const d2 = rot ? { ...def, w:def.d, d:def.w } : def;
@@ -436,6 +454,26 @@ function undo() {
       for (let j = p.sol.j0; j < p.sol.j0 + p.sol.d; j++) setH(i, j, p.sol.h + p.def.p);
 }
 
+/* =========================== pointer routing =========================== */
+/* Routed from the window, not from the element the pointer started on. An
+   element only sees a pointer for as long as its capture holds, and a capture
+   that is never acquired (the call is allowed to fail) or is lost mid-drag
+   leaves the session with no way to ever end — the tile stays stuck to the
+   palette and the held brick hangs over the plate for good. A capture still
+   *helps*: it keeps delivering events when the pointer leaves the window. It
+   just can't be the only thing the teardown depends on.                      */
+addEventListener('pointermove', e => {
+  const s = drags.get(e.pointerId);
+  if (s) moveDrag(e, s); else moveNav(e);
+});
+addEventListener('pointerup',     e => { endDrag(e);   endNav(e); });
+addEventListener('pointercancel', e => { abortDrag(e); endNav(e); });
+/* alt-tab, or a release outside the window, can swallow the pointerup outright */
+addEventListener('blur', abortAllDrags);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) abortAllDrags();
+});
+
 /* =========================== menu =========================== */
 const paletteEl = document.getElementById('palette');
 CATALOG.forEach((def, idx) => {
@@ -460,13 +498,6 @@ CATALOG.forEach((def, idx) => {
     [...paletteEl.children].forEach((c, i) => c.classList.toggle('active', i === idx));
     beginDrag(e, def, el);
   });
-  el.addEventListener('pointermove', e => {
-    const s = drags.get(e.pointerId);
-    if (s) moveDrag(e, s);
-  });
-  const up = e => { el.classList.remove('press'); endDrag(e); };
-  el.addEventListener('pointerup', up);
-  el.addEventListener('pointercancel', up);
 });
 
 const rotStateEl = document.getElementById('rotState');
