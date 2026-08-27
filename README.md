@@ -34,6 +34,7 @@ Kiosk shell (Electron — fullscreen, frameless, locked):
 | Plate | release off the build | it lands on the desk and stays there, pickable later |
 | MORE BRICKS | tap | next tray page — bricks, slopes, curves |
 | CLEAR | tap | demolition — the build leaves one brick at a time |
+| WHAT NEXT? | tap | Gemini suggests one thing to add |
 
 Keyboard: `R` rotate, `Z` undo.
 
@@ -249,52 +250,23 @@ Two asks, both in the tray footer:
 - **WHAT IS THIS?** sends a semantic snapshot of the board and asks for one
   sentence saying what it depicts. The reply lands in a bubble at the top of the
   screen for five seconds.
-- **FINISH THE BUILD** asks it to work out what the thing is *and* how to
-  complete it, and to return up to 30 placements. They are laid one every 160ms
-  through the ordinary `place()` fall, so each piece drops in, clicks, and knocks
-  the board exactly like one placed by hand — about five seconds of building.
+- **WHAT NEXT?** sends the same snapshot and asks for one idea: what it thinks
+  the thing is, then one addition that plays off it — a mouse for the cat, a boat
+  for the lake. It answers in words, not coordinates, and the person places it.
 
-  The ordering is the part worth understanding. This end resolves each landing
-  height itself, so a plan delivered in the wrong sequence would drop a roof onto
-  the baseplate before its walls existed. So the model is asked for the `level`
-  each piece rests at, and the steps are sorted by it — supports first, whatever
-  sits on them after. The level is used *only* for ordering: the real landing is
-  still resolved per piece against the board as it stands, so a wrong level costs
-  one placement instead of producing a floating brick.
+  This replaced a version that asked Gemini to *place* up to 30 pieces itself.
+  That was the wrong job to give it. Even with the geometry described exactly and
+  the coordinate labels corrected, laying out a recognisable picture on a 16x16
+  grid is a spatial task it is weak at, and the results read as noise. Suggesting
+  is a task it is good at, and it leaves the building — the fun part — with the
+  person. The placement plumbing is in the history if it is ever wanted back.
 
-`responseSchema` types are **UPPERCASE** (`OBJECT`, `ARRAY`, `INTEGER`), because
-`Schema.type` is a proto enum and lowercase is quietly *ignored* rather than
-rejected. An ignored schema means the model picks its own field names, which read
-back as `undefined` and filter out to nothing — the failure looks exactly like
-the model refusing to place anything. The reply is also read tolerantly (bare
-array or wrapper object, several spellings per field), and when nothing usable
-survives the error says which case it was and what fields actually arrived.
-
-Both replies are treated as suggestions, not instructions. Piece indices are
-checked against the tray, x/z are clamped onto the board, and every landing goes
-through the same `solveAt` a dragged brick uses. A step that still doesn't fit is
-dropped and the rest carry on, which the prompt says out loud so a careless plan
-visibly costs the model pieces.
+Neither ask can touch the board: both only ever produce a sentence, so there is
+no path at all from a model reply into the grid.
 
 `sceneSummary()` is the interesting half, and it is built around one idea: a
 16x16 board of coloured pieces is far closer to **pixel art than architecture**,
 so hand over the picture, not the parts list.
-
-**Piece extents are written `x3z1`, never `1x3`.** A bare "1x3" is read as
-width-by-depth, which is the transpose of what the tray actually means, so every
-piece gets planned lying the wrong way round — and the model never rotates
-anything, because it already believes the pieces are the way round it wants.
-This one label was the whole reason finished builds looked like noise. The
-prompt also carries a worked example: three steps and the exact picture they
-draw, which is a real plan run through the real pipeline, so it cannot drift
-from the truth.
-
-**Collisions are dropped, not stacked.** A step is placed only if it comes to
-rest at the level it was planned for. Landing anywhere else means the square was
-already taken, so the piece would sit on top of something instead of where it
-belongs — treating that as a stack is what turns a plan into a pile. Deliberate
-stacking still works, because a step that says level 3 and resolves to 3 is
-exactly right.
 
 **Cost.** The payload is one character per stud with no separators, the relief
 grid is only sent when something actually stands above one brick, and the
