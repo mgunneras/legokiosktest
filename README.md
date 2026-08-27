@@ -280,6 +280,22 @@ visibly costs the model pieces.
 16x16 board of coloured pieces is far closer to **pixel art than architecture**,
 so hand over the picture, not the parts list.
 
+**Piece extents are written `x3z1`, never `1x3`.** A bare "1x3" is read as
+width-by-depth, which is the transpose of what the tray actually means, so every
+piece gets planned lying the wrong way round — and the model never rotates
+anything, because it already believes the pieces are the way round it wants.
+This one label was the whole reason finished builds looked like noise. The
+prompt also carries a worked example: three steps and the exact picture they
+draw, which is a real plan run through the real pipeline, so it cannot drift
+from the truth.
+
+**Collisions are dropped, not stacked.** A step is placed only if it comes to
+rest at the level it was planned for. Landing anywhere else means the square was
+already taken, so the piece would sit on top of something instead of where it
+belongs — treating that as a stack is what turns a plan into a pile. Deliberate
+stacking still works, because a step that says level 3 and resolves to 3 is
+exactly right.
+
 **Cost.** The payload is one character per stud with no separators, the relief
 grid is only sent when something actually stands above one brick, and the
 per-piece list is gone — the maps already say everything it said. That is ~1.8k

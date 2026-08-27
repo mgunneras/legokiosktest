@@ -1233,7 +1233,7 @@ function topDown() {
    would: not just an inventory, but where things sit, how high they reach and
    what is grouped with what. The derived lines at the end matter as much as the
    list — they are what let it reason about shape instead of parts. */
-function sceneSummary() {
+function sceneSummary(withTray) {
   const out = [];
   out.push(`BOARD: ${GRID}x${GRID} studs, seen from directly above. x runs 0-${GRID - 1} ` +
            `left to right, z runs 0-${GRID - 1} top to bottom of the map below.`);
@@ -1254,10 +1254,16 @@ function sceneSummary() {
   }
   out.push('');
   if (!placed.length) out.push('The board is empty - nothing drawn yet.');
-  out.push('TRAY, index then colour then size. Shape and colour are fixed together:');
-  const kind = d => d.shape === 'invslope' ? 'inv-slope' : d.shape ? d.shape
-                  : d.p === 1 ? 'flat' : '';
-  out.push(CATALOG.map((d, i) => `${i}=${CODE[COLOUR_NAME[d.c]]}${d.d}x${d.w}${kind(d)}`).join('  '));
+  if (withTray) {
+    // Extents are written as x3z1 rather than "1x3". A bare "1x3" gets read as
+    // width-by-depth, which is the transpose of the truth, and every piece then
+    // gets planned lying the wrong way round.
+    out.push('TRAY. index=colour then x<studs along x>z<studs along z>:');
+    const kind = d => d.shape === 'invslope' ? '-inv' : d.shape ? '-' + d.shape
+                    : d.p === 1 ? '-flat' : '';
+    out.push(CATALOG.map((d, i) =>
+      `${i}=${CODE[COLOUR_NAME[d.c]]}x${d.w}z${d.d}${kind(d)}`).join('  '));
+  }
   return out.join('\n');
 }
 
@@ -1294,11 +1300,24 @@ Constraints, enforced on my side — any step that breaks one is silently droppe
 - At most ${FINISH_MAX} steps. Fewer is fine and usually better: stop when it reads as finished rather than filling the board.
 - "piece" is an index into the tray list above. Shape and colour are fixed together; you cannot recolour a piece.
 - "x" and "z" are the stud coordinates of the piece's lowest corner. The whole piece must fit on the board, so x + width - 1 <= ${GRID - 1} and z + depth - 1 <= ${GRID - 1}.
-- "rotated" true swaps that piece's width and depth.
+- "rotated" false lays the piece as the tray gives it: x-extent along x, z-extent along z. "rotated" true turns it a quarter turn, so it then covers its z-extent along x and its x-extent along z. Piece x3z1 unrotated is a bar three cells wide running left to right; rotated it is a bar three cells tall running top to bottom. Most drawings need both.
+- Two pieces at the same level must not overlap. A piece dropped onto an occupied square does not share it, it lands on top of what is there — so overlapping steps build an accidental pile instead of a picture. A step whose square is already taken at its stated level is discarded.
 - A slope's angled face is not a surface: nothing can rest on it, only on the
   flat studded part. Same for the round tiles, which have no studs at all.
 - "level" is the height in plates the piece rests at: 0 is directly on the baseplate, 3 is on top of one standard brick, 6 on top of two, and so on. A piece rests on whatever is highest beneath its footprint, so anything above level 0 needs something under it at that spot.
 - I lay your steps in ascending "level" order, so supports go down before whatever sits on them. Get the levels right and the build assembles itself correctly.
+
+Worked example. On an empty board these three steps:
+  {"piece":2,"x":5,"z":6,"level":0,"rotated":false}
+  {"piece":0,"x":6,"z":7,"level":0,"rotated":false}
+  {"piece":2,"x":11,"z":4,"level":0,"rotated":true}
+draw exactly this, and nothing else:
+      0123456789012345
+   4  ...........y....
+   5  ...........y....
+   6  .....yyy...y....
+   7  ......r.........
+Piece 2 is x3z1: laid flat it fills x 5,6,7 on row z=6; turned, the same piece fills z 4,5,6 in column x=11.
 
 "reading" is one sentence, at most 12 words, saying what the finished thing is. No hedging, and never mention LEGO, bricks, studs or coordinates.`;
 
@@ -1396,12 +1415,12 @@ async function ask(thinkingText, run) {
 }
 
 tap('btnDescribe', () => ask('looking at your build...', async () => {
-  const text = await callGemini(describePrompt(sceneSummary()), null, true);
+  const text = await callGemini(describePrompt(sceneSummary(false)), null, true);
   say(text.replace(/^["'\s]+|["'\s]+$/g, ''));
 }));
 
 tap('btnFinish', () => ask('working out how to finish it...', async () => {
-  const raw = await callGemini(finishPrompt(sceneSummary()), FINISH_SCHEMA);
+  const raw = await callGemini(finishPrompt(sceneSummary(true)), FINISH_SCHEMA);
   let plan;
   try { plan = JSON.parse(raw); } catch { throw new Error('did not reply with the JSON it was asked for'); }
   // Read tolerantly. The schema asks for one shape, but a wrong guess about the
@@ -1424,7 +1443,7 @@ tap('btnFinish', () => ask('working out how to finish it...', async () => {
     // a floating brick.
     .sort((a, b) => a.level - b.level)
     .slice(0, FINISH_MAX)
-    .map(o => ({ def: CATALOG[o.piece], x: o.x, z: o.z, rot: o.rot }));
+    .map(o => ({ def: CATALOG[o.piece], x: o.x, z: o.z, rot: o.rot, level: o.level }));
   if (!steps.length) {
     // Say which of the two it was, so this is diagnosable rather than a shrug.
     const got = list.length ? `sent ${list.length} steps I could not read (fields: ${Object.keys(list[0] || {}).join(', ')})`
@@ -1434,6 +1453,7 @@ tap('btnFinish', () => ask('working out how to finish it...', async () => {
   buildQueue.length = 0;
   buildQueue.push(...steps);
   buildT = 0;
+  buildDropped = 0;
   const reading = (plan.reading || '').replace(/^["'\s]+|["'\s]+$/g, '');
   say(reading || `Finishing it — ${steps.length} pieces.`, steps.length * BUILD_GAP * 1000 + 2500);
 }));
@@ -1443,17 +1463,23 @@ tap('btnFinish', () => ask('working out how to finish it...', async () => {
    clicks and knocks the board exactly like one placed by hand.              */
 const BUILD_GAP = 0.16;
 const buildQueue = [];
-let buildT = 0;
+let buildT = 0, buildDropped = 0;
 function stepBuild(dt) {
   if (!buildQueue.length) return;
   buildT -= dt;
   if (buildT > 0) return;
   buildT = BUILD_GAP;
+  if (buildQueue.length === 1 && buildDropped)      // last one: own up to the misses
+    setTimeout(() => say(`${buildDropped} of them wouldn't fit where it asked.`), 400);
   const s = buildQueue.shift();
   const w = s.rot ? s.def.d : s.def.w, d = s.rot ? s.def.w : s.def.d;
   const i0 = clamp(s.x, 0, GRID - w), j0 = clamp(s.z, 0, GRID - d);
   const sol = solveAt(placeX(i0, w), placeX(j0, d), s.def, s.rot);
-  if (!sol.ok) return;                         // over the limit: drop this step
+  // Landing somewhere other than the level it was planned for means the square
+  // was already taken, so this piece would sit on top of something rather than
+  // where it was meant to go. Dropping it keeps the picture; placing it makes
+  // the pile that comes of treating a collision as a stack.
+  if (!sol.ok || sol.h !== s.level) { buildDropped++; return; }
   const base = new THREE.Vector3(placeX(sol.i0, sol.w), sol.h * PLATE, placeX(sol.j0, sol.d));
   const from = base.clone();
   from.x += (Math.random() * 2 - 1) * 1.6;     // reached in from slightly different
