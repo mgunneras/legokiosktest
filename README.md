@@ -48,12 +48,33 @@ Keyboard: `R` rotate, `Z` undo.
   dropped into it.
 - Camera is damped (0.2 lerp) with hard clamps on tilt and zoom, so it can't be
   flung off screen.
+- **A brick leaves the library the way it looks in the library.** The picture is
+  drawn long-side-across, so the held brick should read that way too — but a
+  footprint is defined in *world* axes, and which world axis lands across the
+  screen depends on the camera. `screenParity()` picks the pickup parity from the
+  azimuth: world X projects along `(cos az, -sin az·cos pol)` and world Z along
+  `(-sin az, -cos az·cos pol)`, and asking which is flatter reduces to
+  `|sin az|` vs `|cos az|` — the tilt divides out, so only the azimuth matters.
+  Worst case is 30° off horizontal, when the view sits exactly between two grid
+  axes and neither choice is better.
 - **Orientation comes from the camera, not a button.** A drag records the plate
   angle at pickup; `gridRot()` rounds the angle travelled since to the nearest
   90° and takes its parity. Every live drag re-solves each frame, so spinning
   the plate under a stationary finger updates the landing spot and the snap.
 - The held brick rides the finger's ray at a fixed height, lifted along the
   camera's up axis so it doesn't cover its own landing ghost.
+- **The lamp belongs to the room, not to the board.** The board is static in
+  world space and the camera is what orbits, so a world-fixed light stays fixed
+  *relative to the board* and its shadows never move — it reads as walking
+  around a lit table. `placeLights()` carries the sun and rim around with
+  `view.az`, pinning them to the viewer, so the model turns underneath them and
+  the shadows sweep: a baseboard spun on a workbench.
+  Orbiting the camera by θ around a fixed board is the same rigid transform as
+  turning the board by −θ under a fixed camera — they differ by a global
+  rotation about the Y axis through the board's centre, which is the axis both
+  already use — so this renders identically to actually spinning the board,
+  without moving the grid maths out of world space. Offsets are measured from
+  `HOME.az`, so the default framing is lit exactly as it was hand-placed.
 - **The click.** When a brick finishes falling (~150ms) `land()` fires: a pop
   and a knock of the whole board.
   - **Bricks never deform.** ABS is hard — nothing scales a brick group, ever,

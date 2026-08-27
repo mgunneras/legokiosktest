@@ -220,6 +220,21 @@ const HOME = { az: -0.7, pol: 0.92, rad: 34 };
 const POL_MIN = 0.30, POL_MAX = 1.40;            // ~17° (top-down-ish) .. ~80° (near horizon)
 const RAD_MIN = 12,  RAD_MAX = 56;
 
+/* The lamp belongs to the room, not to the board. The board is static in world
+   space and the camera is what orbits, so a world-fixed light stays fixed
+   *relative to the board* and its shadows never move — you're walking around a
+   lit table. Carrying the lights around with the azimuth pins them to the
+   viewer instead, so the model turns underneath them and the shadows sweep:
+   a baseboard spun on a workbench. Offsets are measured from the home view, so
+   the default framing is lit exactly as it was. */
+const SUN = { r: Math.hypot(9, 7),  y: 16, off: Math.atan2(9, 7)   - HOME.az };
+const RIM = { r: Math.hypot(8, 9),  y:  6, off: Math.atan2(-8, -9) - HOME.az };
+function placeLights() {
+  const a = view.az + SUN.off, b = view.az + RIM.off;
+  sun.position.set(SUN.r * Math.sin(a), SUN.y, SUN.r * Math.cos(a));
+  rim.position.set(RIM.r * Math.sin(b), RIM.y, RIM.r * Math.cos(b));
+}
+
 function applyCamera() {
   view.az  += (view.taz  - view.az)  * 0.2;
   view.pol += (view.tpol - view.pol) * 0.2;
@@ -232,6 +247,7 @@ function applyCamera() {
   );
   camera.lookAt(TARGET);
   camera.updateMatrixWorld();   // keep raycasts in sync with the damped camera
+  placeLights();                // ...and the lamp with it
 }
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
@@ -327,9 +343,22 @@ const placeX = (i0, w) => i0 - GRID / 2 + w / 2;
 /* A held brick hangs off your finger in 3D and keeps the orientation it has in
    the air. Spinning the plate underneath turns the grid, not the brick — so it
    lands on whichever grid axis is nearest and you never reach for a button.   */
+/* Which way round a *fresh* brick sits in your hand. The library draws every
+   piece long-side-across, so it should leave the library looking the same — but
+   a footprint is defined in world axes, and which world axis reads as "across
+   the screen" depends on where the camera is. Project the two: world X lands on
+   screen along (cos az, -sin az·cos pol) and world Z along (-sin az, -cos az·cos
+   pol). Comparing which is flatter reduces to |sin az| vs |cos az| — the tilt
+   divides out, so only the azimuth matters and a top-down view is no different
+   from a low one. */
+function screenParity(def) {
+  const xReadsFlatter = Math.abs(Math.cos(view.az)) >= Math.abs(Math.sin(view.az));
+  const longSideIsX   = def.w >= def.d;
+  return longSideIsX === xReadsFlatter ? 0 : 1;
+}
 function gridRot(s) {
   const steps = Math.round((view.az - s.az0) / (Math.PI / 2));
-  return (manualRot + steps) & 1;        // a footprint only cares about parity
+  return (s.rot0 + manualRot + steps) & 1;   // a footprint only cares about parity
 }
 
 function beginDrag(e, def, srcEl) {
@@ -343,8 +372,11 @@ function beginDrag(e, def, srcEl) {
   tile.className = 'tile';
   tile.appendChild(srcEl.querySelector('.swatch').cloneNode(true));
   document.getElementById('chips').appendChild(tile);
+  // Baseline set once, at pickup. `steps` still turns the brick against the
+  // grid as the plate spins under it, so the pickup orientation moves with the
+  // camera without disturbing that.
   const s = { def, tile, src:srcEl, x:e.clientX, y:e.clientY, az0:view.az,
-              held:null, ghost:null, rot:-1, sol:null };
+              rot0:screenParity(def), held:null, ghost:null, rot:-1, sol:null };
   drags.set(e.pointerId, s);
   refreshDrag(s);
 }
