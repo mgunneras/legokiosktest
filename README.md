@@ -130,6 +130,16 @@ Keyboard: `R` rotate, `Z` undo.
   no grid — pickable (`pickList`) but deliberately never stackable (`hitList`),
   since an off-grid brick has no column to resolve against. `flying` is neither:
   owned by the simulation until it commits to one of the others, or to nothing.
+- **The held brick hovers close** — about 0.7 of a brick height off the surface
+  it would land on. `HOVER` and `LIFT` stack (the second pushes along the
+  camera's up axis, not straight up), which at the original values put it over
+  three brick heights away, floating rather than being held.
+- **A 90° turn is a twist, not a swap.** `gridTurns()` accumulates signed
+  quarter-turns instead of collapsing to parity, so the held brick is built once
+  and rotated (~200ms) rather than rebuilt with its dimensions exchanged. The
+  ghost still snaps instantly — it answers "where does this land", not "what is
+  my hand doing". Because the throw now launches from a low hover, `FLICK_LIFT`
+  carries more of the arc than it used to: same throw, less height to fall from.
 - **Throwing.** Release with the hand still moving and the brick arcs in. Hand
   speed and launch speed are different scales — an ordinary drag clocks ~19u/s
   across the hover plane and a real flick ~110, but a brick only wants to travel

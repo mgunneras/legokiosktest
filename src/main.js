@@ -22,9 +22,12 @@ const GRAVITY    = 120;           // not real gravity: 1u = 8mm, so 9.81m/s² is
    clamped version of the hand, not the hand itself. */
 const FLICK_MIN   = 14;           // hand speed below this is a drop, not a throw
 const FLICK_SCALE = 0.22;
-const FLICK_SLOW  = 8;            // gentlest throw: a nudge, ~2 studs
+const FLICK_SLOW  = 11;           // gentlest throw: a nudge, ~2 studs
 const FLICK_FAST  = 40;           // hardest: ~10 studs, and easy to overshoot
-const FLICK_LIFT  = 0.18;         // fraction of speed added upward, to make an arc
+const FLICK_LIFT  = 0.30;         // fraction of speed added upward, to make an arc.
+                                  // Carries more of the arc than it used to, because
+                                  // the hand now hovers low and the drop height no
+                                  // longer does that work — same throw, less height
 const CRASH_ODDS  = 0.2;          // one in five is a dud, as asked
 const ESCAPE      = 24;           // outward kick on a botched landing
 const ESCAPE_SOFT = 9;            // ...and a gentler one, to shed onto the table
@@ -462,8 +465,12 @@ function startPinch() {
 /* =========================== placement solving =========================== */
 const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
-const HOVER = 2.6;                                  // how high a held brick floats
-const LIFT  = 1.5;                                  // ...and how far above the fingertip
+/* These stack: HOVER lifts the brick above the surface it would land on, then
+   LIFT pushes it further along the camera's up axis, so the felt gap is roughly
+   HOVER - brickHeight/2 + LIFT*0.8 — which at the old 2.6/1.5 was over three
+   brick heights. Close enough now to read as holding it just off the studs. */
+const HOVER = 1.05;                                 // how high a held brick floats
+const LIFT  = 0.5;                                  // ...and how far above the fingertip
 const hoverPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const tmpV = new THREE.Vector3(), camUp = new THREE.Vector3(), flingV = new THREE.Vector3();
 
@@ -592,10 +599,14 @@ function screenParity(def) {
   const longSideIsX   = def.w >= def.d;
   return longSideIsX === xReadsFlatter ? 0 : 1;
 }
-function gridRot(s) {
-  const steps = Math.round((view.az - s.az0) / (Math.PI / 2));
-  return (s.rot0 + manualRot + steps) & 1;   // a footprint only cares about parity
+/* Signed and accumulating, so spinning the plate keeps winding the brick the
+   same way instead of flipping it back and forth. A footprint only cares about
+   the parity; the held brick cares about the whole turn count, because that is
+   what lets it be twisted rather than swapped. */
+function gridTurns(s) {
+  return s.rot0 + manualRot + Math.round((view.az - s.az0) / (Math.PI / 2));
 }
+const gridRot = s => gridTurns(s) & 1;
 
 function beginDrag(e, def, srcEl, seedRot) {
   // A pointer id gets reused — a mouse is always id 1 — so a session that was
@@ -616,7 +627,7 @@ function beginDrag(e, def, srcEl, seedRot) {
   // camera without disturbing that.
   const s = { def, tile, src:srcEl, x:e.clientX, y:e.clientY, az0:view.az,
               rot0: seedRot === undefined ? screenParity(def) : ((seedRot - manualRot) & 1),
-              held:null, ghost:null, rot:-1, sol:null,
+              held:null, ghost:null, rot:-1, sol:null, yaw:0, yawTo:0,
               vel:new THREE.Vector3(), lastPos:new THREE.Vector3(), lastT:0 };
   drags.set(e.pointerId, s);
   refreshDrag(s);
@@ -636,14 +647,20 @@ function refreshDrag(s) {
     s.tile.style.display = over ? 'none' : 'block'; // 3D takes over on the stage
   }
 
-  const rot = gridRot(s);
-  if (rot !== s.rot) {                              // snapped to the other grid axis
-    const def = rot ? { ...s.def, w:s.def.d, d:s.def.w } : s.def;
-    if (s.held)  scene.remove(s.held);
-    if (s.ghost) build.remove(s.ghost);
-    s.held  = buildBrick(def);                      // solid — this is the one in your hand
-    s.ghost = buildBrick(def, true);                // translucent — this is where it lands
+  const turns = gridTurns(s), rot = turns & 1;
+  if (!s.held) {                                    // built once, then only turned
+    s.held = buildBrick(s.def);                     // solid — this is the one in your hand
     scene.add(s.held);
+    s.yaw = turns * (Math.PI / 2);
+  }
+  // The hand twists; it doesn't teleport. The ghost still snaps, because it is
+  // answering "where does this land", not "what is my hand doing".
+  s.yawTo = turns * (Math.PI / 2);
+  s.yaw += (s.yawTo - s.yaw) * 0.32;
+  s.held.rotation.y = s.yaw;
+  if (rot !== s.rot) {                              // snapped to the other grid axis
+    if (s.ghost) build.remove(s.ghost);
+    s.ghost = buildBrick(rot ? { ...s.def, w:s.def.d, d:s.def.w } : s.def, true);
     build.add(s.ghost);                             // sticks to the board, bounce and all
     s.rot = rot;
   }
@@ -1047,4 +1064,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, popSound, boardY, solveAt, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
