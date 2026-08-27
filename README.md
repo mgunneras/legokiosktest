@@ -230,11 +230,24 @@ Two asks, both in the tray footer:
 - **WHAT IS THIS?** sends a semantic snapshot of the board and asks for one
   sentence saying what it depicts. The reply lands in a bubble at the top of the
   screen for five seconds.
-- **ADD A BRICK** sends the same snapshot and asks for one piece and a spot,
-  with a `responseSchema` so the reply is structured rather than parsed out of
-  prose. The answer is treated as a suggestion, not an instruction: the index is
-  checked against the tray, x/z are clamped, and the landing is resolved through
-  the same `solveAt` a dragged brick uses, so nothing illegal can be placed.
+- **FINISH THE BUILD** asks it to work out what the thing is *and* how to
+  complete it, and to return up to 30 placements. They are laid one every 160ms
+  through the ordinary `place()` fall, so each piece drops in, clicks, and knocks
+  the board exactly like one placed by hand — about five seconds of building.
+
+  The ordering is the part worth understanding. This end resolves each landing
+  height itself, so a plan delivered in the wrong sequence would drop a roof onto
+  the baseplate before its walls existed. So the model is asked for the `level`
+  each piece rests at, and the steps are sorted by it — supports first, whatever
+  sits on them after. The level is used *only* for ordering: the real landing is
+  still resolved per piece against the board as it stands, so a wrong level costs
+  one placement instead of producing a floating brick.
+
+Both replies are treated as suggestions, not instructions. Piece indices are
+checked against the tray, x/z are clamped onto the board, and every landing goes
+through the same `solveAt` a dragged brick uses. A step that still doesn't fit is
+dropped and the rest carry on, which the prompt says out loud so a careless plan
+visibly costs the model pieces.
 
 `sceneSummary()` is the interesting half. The model cannot see the board, so the
 snapshot carries what a picture would: every piece with its colour, footprint and

@@ -1116,31 +1116,45 @@ Rules:
 
 Reply with the sentence and nothing else.`;
 
-const addPrompt = scene => `Someone is building on a LEGO baseplate. Here is exactly what is on it.
+const FINISH_MAX = 30;
+const finishPrompt = scene => `Someone is part-way through building on a LEGO baseplate. Here is exactly what is on it.
 
 ${scene}
 
-Add exactly one more piece.
+Finish it for them.
 
-Decide first what the build depicts, then pick the piece and spot that best develop that idea: extend a wall, raise a roofline, start a second tree, break up a flat facade. Prefer a placement that touches or builds on what is already there over one stranded in open space. On an empty board, start something worth continuing.
+Decide first what it is, then work out what is missing and give the placements that would complete it. Treat it as a build, not a shopping list: walls want closing, a roof wants walls under it, a tree wants a trunk before a canopy, and symmetry that has been started wants finishing. Something already at the edge of the board must not grow off it.
 
-Placement rules, strictly enforced:
-- "piece" is an index into the tray list above.
-- "x" and "z" are the stud coordinates of the piece's lowest corner. The whole piece must fit within 0-${GRID - 1} on both axes.
-- "rotated" true swaps the piece's width and depth.
-- A piece rests on the highest thing under its footprint, so placing it over something stacks it automatically.
-- "why" is one short clause, 10 words maximum, plain language, no LEGO jargon.`;
+Constraints, enforced on my side — any step that breaks one is silently dropped, so a careless plan comes out full of holes:
+- At most ${FINISH_MAX} steps. Fewer is fine and usually better: stop when it reads as finished rather than filling the board.
+- "piece" is an index into the tray list above. Shape and colour are fixed together; you cannot recolour a piece.
+- "x" and "z" are the stud coordinates of the piece's lowest corner. The whole piece must fit on the board, so x + width - 1 <= ${GRID - 1} and z + depth - 1 <= ${GRID - 1}.
+- "rotated" true swaps that piece's width and depth.
+- "level" is the height in plates the piece rests at: 0 is directly on the baseplate, 3 is on top of one standard brick, 6 on top of two, and so on. A piece rests on whatever is highest beneath its footprint, so anything above level 0 needs something under it at that spot.
+- I lay your steps in ascending "level" order, so supports go down before whatever sits on them. Get the levels right and the build assembles itself correctly.
 
-const ADD_SCHEMA = {
+"reading" is one sentence, at most 12 words, saying what the finished thing is. No hedging, and never mention LEGO, bricks, studs or coordinates.`;
+
+const FINISH_SCHEMA = {
   type: 'object',
   properties: {
-    piece:   { type: 'integer' },
-    x:       { type: 'integer' },
-    z:       { type: 'integer' },
-    rotated: { type: 'boolean' },
-    why:     { type: 'string'  },
+    reading: { type: 'string' },
+    steps: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          piece:   { type: 'integer' },
+          x:       { type: 'integer' },
+          z:       { type: 'integer' },
+          level:   { type: 'integer' },
+          rotated: { type: 'boolean' },
+        },
+        required: ['piece', 'x', 'z', 'level', 'rotated'],
+      },
+    },
   },
-  required: ['piece', 'x', 'z', 'rotated', 'why'],
+  required: ['reading', 'steps'],
 };
 
 /* Key goes in a header, never the query string — URLs get logged and shared. */
@@ -1189,10 +1203,11 @@ function say(text, hold = 5000, thinking = false) {
 
 /* ---------- the two asks ---------- */
 const describeBtn = document.getElementById('btnDescribe');
-const addBrickBtn = document.getElementById('btnAddBrick');
+const addBrickBtn = document.getElementById('btnFinish');
 let asking = false;
 async function ask(thinkingText, run) {
   if (asking) return;
+  if (buildQueue.length) return;                // let it finish laying first
   if (!cfg.key || !cfg.model) { openDebug(); say('Add a Gemini API key and pick a model first.'); return; }
   asking = true;
   describeBtn.disabled = addBrickBtn.disabled = true;
@@ -1207,23 +1222,51 @@ tap('btnDescribe', () => ask('looking at your build...', async () => {
   say(text.replace(/^["'\s]+|["'\s]+$/g, ''));
 }));
 
-tap('btnAddBrick', () => ask('deciding what to add...', async () => {
-  const raw = await callGemini(addPrompt(sceneSummary()), ADD_SCHEMA);
+tap('btnFinish', () => ask('working out how to finish it...', async () => {
+  const raw = await callGemini(finishPrompt(sceneSummary()), FINISH_SCHEMA);
   let plan;
   try { plan = JSON.parse(raw); } catch { throw new Error('did not reply with the JSON it was asked for'); }
-  const def = CATALOG[plan.piece];
-  if (!def) throw new Error(`asked for piece ${plan.piece}, which is not in the tray`);
-  const rot = plan.rotated ? 1 : 0;
-  const w = rot ? def.d : def.w, d = rot ? def.w : def.d;
-  // Trust it to choose, not to be in bounds: clamp, then resolve the landing the
-  // same way a dragged brick does, so nothing can be placed illegally.
-  const i0 = clamp(Math.round(plan.x) || 0, 0, GRID - w);
-  const j0 = clamp(Math.round(plan.z) || 0, 0, GRID - d);
-  const sol = solveAt(placeX(i0, w), placeX(j0, d), def, rot);
-  if (!sol.ok) throw new Error('that spot is already at the height limit');
-  place(def, sol, rot, null);
-  say(plan.why ? `${plan.why} — ${pieceName(def)}` : `Added a ${pieceName(def)}.`);
+  const steps = (plan.steps || [])
+    .filter(s => CATALOG[s.piece])
+    .slice(0, FINISH_MAX)
+    // Ascending level, so supports are laid before whatever rests on them. The
+    // level is only used to order: the real landing is still resolved per piece
+    // against the board as it stands, so a wrong level costs a placement, never
+    // a floating brick.
+    .sort((a, b) => (a.level || 0) - (b.level || 0))
+    .map(s => ({ def: CATALOG[s.piece], x: Math.round(s.x) || 0, z: Math.round(s.z) || 0,
+                 rot: s.rotated ? 1 : 0 }));
+  if (!steps.length) throw new Error('came back with nothing to place');
+  buildQueue.length = 0;
+  buildQueue.push(...steps);
+  buildT = 0;
+  const reading = (plan.reading || '').replace(/^["'\s]+|["'\s]+$/g, '');
+  say(reading || `Finishing it — ${steps.length} pieces.`, steps.length * BUILD_GAP * 1000 + 2500);
 }));
+
+/* Laid one at a time rather than all at once, so it reads as being built —
+   each piece drops in from above through the ordinary fall, which means it
+   clicks and knocks the board exactly like one placed by hand.              */
+const BUILD_GAP = 0.16;
+const buildQueue = [];
+let buildT = 0;
+function stepBuild(dt) {
+  if (!buildQueue.length) return;
+  buildT -= dt;
+  if (buildT > 0) return;
+  buildT = BUILD_GAP;
+  const s = buildQueue.shift();
+  const w = s.rot ? s.def.d : s.def.w, d = s.rot ? s.def.w : s.def.d;
+  const i0 = clamp(s.x, 0, GRID - w), j0 = clamp(s.z, 0, GRID - d);
+  const sol = solveAt(placeX(i0, w), placeX(j0, d), s.def, s.rot);
+  if (!sol.ok) return;                         // over the limit: drop this step
+  const base = new THREE.Vector3(placeX(sol.i0, sol.w), sol.h * PLATE, placeX(sol.j0, sol.d));
+  const from = base.clone();
+  from.x += (Math.random() * 2 - 1) * 1.6;     // reached in from slightly different
+  from.z += (Math.random() * 2 - 1) * 1.6;     // angles, so it isn't a machine
+  from.y += 5.5 + build.position.y;            // `place` reads `from` as world
+  place(s.def, sol, s.rot, from);
+}
 
 /* ---------- key + model panel ---------- */
 const keyBtn    = document.getElementById('btnKey');
@@ -1339,6 +1382,7 @@ function tick(now) {
     land(p);
   }
   tickHolds(now);
+  stepBuild(dt);
   stepDemolition(dt);
   stepFlight(dt);
   renderer.render(scene, camera);
@@ -1358,4 +1402,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, audioState, buildQueue, stepBuild, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
