@@ -33,7 +33,7 @@ const ESCAPE      = 24;           // outward kick on a botched landing
 const ESCAPE_SOFT = 9;            // ...and a gentler one, to shed onto the table
 const TABLE_Y     = -PLATE - 0.005;   // the desk the baseplate sits on
 const TABLE_R     = GRID * 1.25 - 1;  // ...as far as a brick can come to rest
-const HOLD_MS     = 300;          // press-and-hold before a brick comes loose
+const HOLD_MS     = 180;          // press-and-hold before a brick comes loose
 const HOLD_SLOP   = 7;            // px of travel that turns a hold into an orbit
 const DOUBLE_MS   = 340;
 const CHUCK_UP    = 30;           // double-tap launch speed; apex ~4-7u, not ~1
@@ -46,22 +46,54 @@ const C = {
   white:'#f2f3f2', grey:'#a0a5a9', black:'#2b2f33', orange:'#e07923',
   tan:'#d9bb7c', lime:'#a5ca18', azure:'#57a0d3', purple:'#81007b',
 };
-// w = studs along X, d = studs along Z, p = height in plates
+/* w = studs along X, d = studs along Z, p = height in plates. `page` is only
+   which tray page it appears on — Gemini always sees the whole catalogue.
+   Shapes are real elements; the part numbers are there so they can be looked up.
+   `run` is how many studs a slope falls across, `flat` how many studs of level
+   top a curve keeps before it turns over. Footprint and height are unchanged by
+   shape, so placement, stacking and the grid never learn about any of this. */
 const CATALOG = [
-  { id:'b1x1', w:1, d:1, p:3, c:C.red },
-  { id:'b1x2', w:2, d:1, p:3, c:C.blue },
-  { id:'b1x3', w:3, d:1, p:3, c:C.yellow },
-  { id:'b1x4', w:4, d:1, p:3, c:C.green },
-  { id:'b1x6', w:6, d:1, p:3, c:C.orange },
-  { id:'b1x8', w:8, d:1, p:3, c:C.purple },
-  { id:'b2x2', w:2, d:2, p:3, c:C.white },
-  { id:'b2x3', w:3, d:2, p:3, c:C.azure },
-  { id:'b2x4', w:4, d:2, p:3, c:C.grey },
-  { id:'b2x6', w:6, d:2, p:3, c:C.lime },
-  { id:'p2x2', w:2, d:2, p:1, c:C.tan },
-  { id:'p2x4', w:4, d:2, p:1, c:C.black },
+  // --- page 0: bricks and plates ---
+  { id:'b1x1', w:1, d:1, p:3, c:C.red,    page:0 },
+  { id:'b1x2', w:2, d:1, p:3, c:C.blue,   page:0 },
+  { id:'b1x3', w:3, d:1, p:3, c:C.yellow, page:0 },
+  { id:'b1x4', w:4, d:1, p:3, c:C.green,  page:0 },
+  { id:'b1x6', w:6, d:1, p:3, c:C.orange, page:0 },
+  { id:'b1x8', w:8, d:1, p:3, c:C.purple, page:0 },
+  { id:'b2x2', w:2, d:2, p:3, c:C.white,  page:0 },
+  { id:'b2x3', w:3, d:2, p:3, c:C.azure,  page:0 },
+  { id:'b2x4', w:4, d:2, p:3, c:C.grey,   page:0 },
+  { id:'b2x6', w:6, d:2, p:3, c:C.lime,   page:0 },
+  { id:'p2x2', w:2, d:2, p:1, c:C.tan,    page:0 },
+  { id:'p2x4', w:4, d:2, p:1, c:C.black,  page:0 },
+
+  // --- page 1: slopes. A brick-height fall across one stud is ~50 degrees,
+  //     which is the element everyone calls a 45; across two studs it is ~31,
+  //     the one called a 33. The names are LEGO's, the angles are geometry's. ---
+  { id:'s3040',  w:2, d:1, p:3, c:C.red,    page:1, shape:'slope',    run:1, part:'3040',  label:'slope 45 2x1' },
+  { id:'s3039',  w:2, d:2, p:3, c:C.blue,   page:1, shape:'slope',    run:1, part:'3039',  label:'slope 45 2x2' },
+  { id:'s3037',  w:4, d:2, p:3, c:C.yellow, page:1, shape:'slope',    run:1, part:'3037',  label:'slope 45 2x4' },
+  { id:'s4286',  w:3, d:1, p:3, c:C.green,  page:1, shape:'slope',    run:2, part:'4286',  label:'slope 33 3x1' },
+  { id:'s3298',  w:3, d:2, p:3, c:C.orange, page:1, shape:'slope',    run:2, part:'3298',  label:'slope 33 3x2' },
+  { id:'s54200', w:1, d:1, p:2, c:C.white,  page:1, shape:'slope',    run:1, part:'54200', label:'cheese slope' },
+  { id:'s85984', w:2, d:1, p:2, c:C.azure,  page:1, shape:'slope',    run:1, part:'85984', label:'slope 30 2x1' },
+  { id:'s3665',  w:2, d:1, p:3, c:C.grey,   page:1, shape:'invslope', run:1, part:'3665',  label:'inverted 2x1' },
+  { id:'s3660',  w:2, d:2, p:3, c:C.tan,    page:1, shape:'invslope', run:1, part:'3660',  label:'inverted 2x2' },
+
+  // --- page 2: curves and round parts ---
+  { id:'c11477', w:2, d:1, p:3, c:C.red,    page:2, shape:'curve', flat:1, part:'11477', label:'curve 2x1' },
+  { id:'c50950', w:3, d:1, p:3, c:C.blue,   page:2, shape:'curve', flat:1, part:'50950', label:'curve 3x1' },
+  { id:'c61678', w:4, d:1, p:3, c:C.yellow, page:2, shape:'curve', flat:1, part:'61678', label:'curve 4x1' },
+  { id:'c15068', w:2, d:2, p:3, c:C.green,  page:2, shape:'curve', flat:1, part:'15068', label:'curve 2x2' },
+  { id:'c6091',  w:2, d:1, p:4, c:C.purple, page:2, shape:'curve', flat:0, part:'6091',  label:'curved top' },
+  { id:'r3062',  w:1, d:1, p:3, c:C.orange, page:2, shape:'round', part:'3062',  label:'round 1x1' },
+  { id:'r3941',  w:2, d:2, p:3, c:C.lime,   page:2, shape:'round', part:'3941',  label:'round 2x2' },
+  { id:'r98138', w:1, d:1, p:1, c:C.black,  page:2, shape:'round', part:'98138', label:'round tile 1x1' },
+  { id:'r4150',  w:2, d:2, p:1, c:C.tan,    page:2, shape:'round', part:'4150',  label:'round tile 2x2' },
 ];
-const label = b => `${b.d}x${b.w}${b.p === 1 ? ' plate' : ''}`;
+const PAGE_NAMES = ['BRICKS', 'SLOPES', 'CURVES'];
+const PAGES = PAGE_NAMES.map((_, n) => CATALOG.filter(d => d.page === n));
+const label = b => b.label || `${b.d}x${b.w}${b.p === 1 ? ' plate' : ''}`;
 
 /* =========================== scene =========================== */
 const canvas   = document.getElementById('gl');
@@ -306,19 +338,63 @@ function spring(s, k = 0.55, c = 0.62) {
 }
 const boardY = { y: 0, v: 0 };   // the whole board dips when a brick clicks in
 
-/* builds a brick as a Group: body box + studs. Origin = footprint centre, y = base. */
+/* A shaped body is a 2D side profile extruded across the piece's depth: the
+   profile is drawn in x (length) and y (height), so a slope is four points and
+   a curve is three plus an arc. Built once per part and shared. */
+const geoCache = new Map();
+function shapeGeo(def) {
+  const h = def.p * PLATE, w = def.w - GAP, d = def.d - GAP;
+  if (def.shape === 'round') {
+    const g = new THREE.CylinderGeometry(w / 2, w / 2, h, 24);
+    g.translate(0, h / 2, 0);
+    return g;
+  }
+  const s = new THREE.Shape();
+  if (def.shape === 'slope') {                  // high at +x, falling to nothing
+    s.moveTo(0, 0); s.lineTo(w, 0); s.lineTo(w, h);
+    s.lineTo(w - def.run, h); s.lineTo(0, 0);
+  } else if (def.shape === 'invslope') {        // the same wedge, turned over
+    s.moveTo(0, h); s.lineTo(w, h); s.lineTo(w, 0);
+    s.lineTo(w - def.run, 0); s.lineTo(0, h);
+  } else {                                      // curve: flat top, then it rolls off
+    const flat = def.flat ?? 1;
+    s.moveTo(0, 0); s.lineTo(w, 0); s.lineTo(w, h); s.lineTo(w - flat, h);
+    s.quadraticCurveTo((w - flat) * 0.52, h, 0, 0);
+  }
+  const g = new THREE.ExtrudeGeometry(s, { depth: d, bevelEnabled: false, curveSegments: 14 });
+  g.translate(-w / 2, 0, -d / 2);               // centre the footprint, base at y=0
+  return g;
+}
+const geoFor = def => {
+  if (!geoCache.has(def.id)) geoCache.set(def.id, shapeGeo(def));
+  return geoCache.get(def.id);
+};
+/* Studs only where there is full-height top to put them on. */
+function studAt(def, i) {
+  if (def.shape === 'slope') return i >= def.w - def.run;
+  if (def.shape === 'curve') return i >= def.w - (def.flat ?? 1);
+  return true;                                  // plain, inverted and round: all of it
+}
+
+/* builds a brick as a Group: body + studs. Origin = footprint centre, y = base. */
 function buildBrick(def, ghost = false, tintHex = null) {
   const g = new THREE.Group();
   const h = def.p * PLATE;
   const mat = brickMat(tintHex || def.c, ghost);
 
-  const body = new THREE.Mesh(boxGeo, mat);
-  body.scale.set(def.w - GAP, h, def.d - GAP);
-  body.position.y = h / 2;
+  let body;
+  if (def.shape) {
+    body = new THREE.Mesh(geoFor(def), mat);    // profile already sits on y = 0
+  } else {
+    body = new THREE.Mesh(boxGeo, mat);
+    body.scale.set(def.w - GAP, h, def.d - GAP);
+    body.position.y = h / 2;
+  }
   body.castShadow = !ghost; body.receiveShadow = !ghost;
   g.add(body);
 
   for (let i = 0; i < def.w; i++) {
+    if (!studAt(def, i)) continue;
     for (let j = 0; j < def.d; j++) {
       const s = new THREE.Mesh(studGeo, mat);
       s.position.set(i - (def.w - 1) / 2, h + STUD_H / 2, j - (def.d - 1) / 2);
@@ -328,6 +404,9 @@ function buildBrick(def, ghost = false, tintHex = null) {
     }
   }
   g.userData.pickBody = body;
+  // The footprint box, for anything that needs the piece's extent rather than
+  // its silhouette — the press highlight, mostly.
+  g.userData.span = new THREE.Vector3(def.w - GAP, h, def.d - GAP);
   return g;
 }
 
@@ -555,7 +634,7 @@ let lastTap = { rec: null, t: 0 };
 
 function startHold(e, rec) {
   const blocked = !isFree(rec);
-  const body = rec.g.userData.pickBody;
+  const span = rec.g.userData.span;
   // Depth-tested on purpose: drawing through the brick reads as an x-ray cage
   // rather than its edges lighting up. Nudged out just far enough to clear the
   // surface without z-fighting.
@@ -563,8 +642,8 @@ function startHold(e, rec) {
     color: blocked ? '#ff3b3b' : '#ffd21e', transparent: true, opacity: 0.35,
     depthWrite: false,
   }));
-  line.scale.copy(body.scale).multiplyScalar(1.03);
-  line.position.copy(body.position);
+  line.scale.copy(span).multiplyScalar(1.03);
+  line.position.y = span.y / 2;
   line.renderOrder = 2;
   rec.g.add(line);
   holds.set(e.pointerId, { rec, blocked, line, t0: performance.now(),
@@ -998,37 +1077,47 @@ document.addEventListener('visibilitychange', () => {
 
 /* =========================== menu =========================== */
 const paletteEl = document.getElementById('palette');
-CATALOG.forEach((def, idx) => {
-  const el = document.createElement('div');
-  el.className = 'brick' + (idx === 0 ? ' active' : '');
-  const sw = document.createElement('div');
-  sw.className = 'swatch';
-  sw.style.background = def.c;
-  sw.style.gridTemplateColumns = `repeat(${def.w}, var(--stud))`;
-  for (let n = 0; n < def.w * def.d; n++) sw.appendChild(document.createElement('i'));
-  const lb = document.createElement('div');
-  lb.className = 'lbl';
-  lb.textContent = label(def);
-  el.append(sw, lb);
-  paletteEl.appendChild(el);
+const pageStateEl = document.getElementById('pageState');
+let page = 0;
 
-  el.addEventListener('pointerdown', e => {
-    e.preventDefault();
-    unlock();          // before the capture below: UNDO and CLEAR are the only
-                       // paths that never capture a pointer, and they are also
-                       // the only ones that reliably start sound on iPad
-    try { el.setPointerCapture(e.pointerId); } catch {}
-    el.classList.add('press');
-    selected = idx;
-    [...paletteEl.children].forEach((c, i) => c.classList.toggle('active', i === idx));
-    beginDrag(e, def, el);
+/* The tray shows one page at a time; the catalogue behind it is always whole,
+   so Gemini's piece indices stay valid whichever page happens to be open. */
+function renderPalette() {
+  paletteEl.replaceChildren();
+  PAGES[page].forEach((def, idx) => {
+    const el = document.createElement('div');
+    el.className = 'brick' + (idx === 0 ? ' active' : '');
+    const sw = document.createElement('div');
+    sw.className = 'swatch' + (def.shape ? ' ' + def.shape : '');
+    sw.style.background = def.c;
+    sw.style.gridTemplateColumns = `repeat(${def.w}, var(--stud))`;
+    for (let n = 0; n < def.w * def.d; n++) sw.appendChild(document.createElement('i'));
+    const lb = document.createElement('div');
+    lb.className = 'lbl';
+    lb.textContent = label(def);
+    if (def.part) el.title = `part ${def.part}`;
+    el.append(sw, lb);
+    paletteEl.appendChild(el);
+
+    el.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      unlock();          // before the capture below: UNDO and CLEAR are the only
+                         // paths that never capture a pointer, and they are also
+                         // the only ones that reliably start sound on iPad
+      try { el.setPointerCapture(e.pointerId); } catch {}
+      el.classList.add('press');
+      selected = idx;
+      [...paletteEl.children].forEach((c, i) => c.classList.toggle('active', i === idx));
+      beginDrag(e, def, el);
+    });
   });
-});
+  pageStateEl.textContent = `${PAGE_NAMES[page]} ${page + 1}/${PAGES.length}`;
+}
 
-const rotStateEl = document.getElementById('rotState');
 const tap = (id, fn) => document.getElementById(id)
   .addEventListener('pointerdown', e => { e.preventDefault(); fn(); });
-tap('btnRotate', () => { manualRot ^= 1; rotStateEl.textContent = manualRot ? '90°' : '0°'; });
+renderPalette();
+tap('btnPage', () => { page = (page + 1) % PAGES.length; renderPalette(); });
 /* No button for this any more — throwing earned its place. F still toggles it,
    for when a flick needs ruling out while chasing something else.           */
 const toggleFlick = () => { flickOn = !flickOn; };
@@ -1040,7 +1129,9 @@ tap('btnFull', () => {
   else document.exitFullscreen?.();
 });
 addEventListener('keydown', e => {
-  if (e.key === 'r' || e.key === 'R') { manualRot ^= 1; rotStateEl.textContent = manualRot ? '90°' : '0°'; }
+  // No button for this any more: spinning the plate turns the brick and is the
+  // more discoverable of the two. R stays as a fallback on a fixed view.
+  if (e.key === 'r' || e.key === 'R') manualRot ^= 1;
   if (e.key === 'z' || e.key === 'Z') undo();
   if (e.key === 'f' || e.key === 'F') toggleFlick();
 });
@@ -1124,7 +1215,9 @@ function sceneSummary() {
   out.push('');
   if (!placed.length) out.push('The board is empty - nothing drawn yet.');
   out.push('TRAY, index then colour then size. Shape and colour are fixed together:');
-  out.push(CATALOG.map((d, i) => `${i}=${CODE[COLOUR_NAME[d.c]]}${d.d}x${d.w}${d.p === 1 ? 'flat' : ''}`).join('  '));
+  const kind = d => d.shape === 'invslope' ? 'inv-slope' : d.shape ? d.shape
+                  : d.p === 1 ? 'flat' : '';
+  out.push(CATALOG.map((d, i) => `${i}=${CODE[COLOUR_NAME[d.c]]}${d.d}x${d.w}${kind(d)}`).join('  '));
   return out.join('\n');
 }
 

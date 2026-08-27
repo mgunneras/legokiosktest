@@ -32,7 +32,7 @@ Kiosk shell (Electron — fullscreen, frameless, locked):
 | Plate | press and hold a brick (300ms) | edges light, then it lifts back into your hand |
 | Plate | double-tap a brick | it gets chucked off the table |
 | Plate | release off the build | it lands on the desk and stays there, pickable later |
-| ROTATE | tap | optional 90° offset if you'd rather not spin the view |
+| MORE BRICKS | tap | next tray page — bricks, slopes, curves |
 | CLEAR | tap | demolition — the build leaves one brick at a time |
 
 Keyboard: `R` rotate, `Z` undo.
@@ -41,6 +41,16 @@ Keyboard: `R` rotate, `Z` undo.
 
 - `src/main.js` — everything: scene, camera rig, pointer routing, snapping.
 - 1 world unit = 1 stud pitch (8 mm). Plate = 0.4u, brick = 1.2u.
+- **Shape is only ever skin.** Slopes, curves and round parts are a 2D side
+  profile extruded across the piece's depth — four points for a slope, three
+  and an arc for a curve — cached per part. Footprint and height are unchanged
+  by shape, so placement, stacking, the grid and the physics never learn that
+  any of it exists. Studs are omitted where there is no full-height top to put
+  them on. The angles are geometry rather than marketing: a brick-height fall
+  across one stud is ~50°, which is the element everyone calls a 45; across two
+  studs it is ~31°, the one called a 33.
+- The tray pages, but `CATALOG` stays whole behind it, so Gemini's piece indices
+  are valid whichever page happens to be open.
 - `heights` is an `Int16Array(16*16)` of stacked plate counts per stud column.
   Placement raycasts the baseplate + placed bricks, converts the hit to a grid
   cell, and takes the max column height under the footprint.

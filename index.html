@@ -21,14 +21,19 @@
         <p id="hint">drag a brick onto the plate.<br>drop bricks on bricks to build up.<br>spin the plate to turn it 90&#176;<br>flick as you let go to throw it.</p>
       </header>
       <div id="palette"></div>
+      <div id="pageBar">
+        <button class="tool" id="btnPage">MORE BRICKS <span id="pageState">BRICKS 1/3</span></button>
+      </div>
+      <div id="aiGroup">
+        <span id="aiLabel">GEMINI</span>
+        <button class="tool ai" id="btnDescribe">WHAT IS THIS?</button>
+        <button class="tool ai" id="btnFinish">FINISH THE BUILD</button>
+      </div>
       <footer id="menuFoot">
-        <button class="tool" id="btnRotate">ROTATE <span id="rotState">0°</span></button>
         <button class="tool" id="btnUndo">UNDO</button>
         <button class="tool" id="btnClear">CLEAR</button>
         <button class="tool" id="btnHome">RESET VIEW</button>
         <button class="tool" id="btnFull">FULLSCREEN</button>
-        <button class="tool ai" id="btnDescribe">WHAT IS THIS?</button>
-        <button class="tool ai" id="btnFinish">FINISH THE BUILD</button>
       </footer>
     </aside>
     <main id="stage">
