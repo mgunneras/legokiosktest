@@ -243,6 +243,14 @@ Two asks, both in the tray footer:
   still resolved per piece against the board as it stands, so a wrong level costs
   one placement instead of producing a floating brick.
 
+`responseSchema` types are **UPPERCASE** (`OBJECT`, `ARRAY`, `INTEGER`), because
+`Schema.type` is a proto enum and lowercase is quietly *ignored* rather than
+rejected. An ignored schema means the model picks its own field names, which read
+back as `undefined` and filter out to nothing — the failure looks exactly like
+the model refusing to place anything. The reply is also read tolerantly (bare
+array or wrapper object, several spellings per field), and when nothing usable
+survives the error says which case it was and what fields actually arrived.
+
 Both replies are treated as suggestions, not instructions. Piece indices are
 checked against the tray, x/z are clamped onto the board, and every landing goes
 through the same `solveAt` a dragged brick uses. A step that still doesn't fit is
@@ -252,6 +260,15 @@ visibly costs the model pieces.
 `sceneSummary()` is the interesting half, and it is built around one idea: a
 16x16 board of coloured pieces is far closer to **pixel art than architecture**,
 so hand over the picture, not the parts list.
+
+**Cost.** The payload is one character per stud with no separators, the relief
+grid is only sent when something actually stands above one brick, and the
+per-piece list is gone — the maps already say everything it said. That is ~1.8k
+characters for describe and ~3.0k for finish, down from 4.1k and 5.3k. Describe
+also runs with `thinkingBudget: 0`, since a fourteen-word answer needs no
+reasoning tokens and 2.5 bills them as output; the guard is narrow because only
+the flash models accept a zero budget, and finish keeps its thinking where it
+earns its cost.
 
 It renders two top-down grids. The first is what the board actually looks like
 from above — one cell per stud, two-letter colour codes, `..` for bare plate,

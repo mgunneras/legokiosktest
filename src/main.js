@@ -1060,8 +1060,10 @@ const saveCfg = () => { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg))
 const COLOUR_NAME = {};
 for (const [n, hex] of Object.entries(C)) COLOUR_NAME[hex] = n;
 const pieceName = d => `${COLOUR_NAME[d.c]} ${d.d}x${d.w} ${d.p === 1 ? 'plate' : 'brick'}`;
-const CODE = { red:'rd', blue:'bl', yellow:'yl', green:'gn', white:'wh', grey:'gy',
-               black:'bk', orange:'or', tan:'tn', lime:'lm', azure:'az', purple:'pu' };
+/* One character per cell, no separators: a third of the tokens of a spaced
+   two-letter grid, and it reads more like the picture it is. */
+const CODE = { red:'r', blue:'b', yellow:'y', green:'g', white:'w', grey:'s',
+               black:'k', orange:'o', tan:'t', lime:'l', azure:'a', purple:'p' };
 
 /* The single most useful thing to hand over: what the board actually looks like
    from above. A list of pieces describes the parts; this describes the picture,
@@ -1079,19 +1081,21 @@ function topDown() {
       }
   }
   const pad = v => String(v).padStart(2, ' ');
-  const head = '     ' + Array.from({ length: GRID }, (_, i) => pad(i)).join(' ') + '   <- x';
+  const head = '    0123456789...   x ->';
   const paint = [head], relief = [head];
+  let tallest = 0;
   for (let j = 0; j < GRID; j++) {
-    const cells = [], highs = [];
+    let cells = '', highs = '';
     for (let i = 0; i < GRID; i++) {
       const n = j * GRID + i;
-      cells.push(colour[n] ? CODE[colour[n]] : '..');
-      highs.push(top[n] ? pad(top[n]) : ' .');
+      cells += colour[n] ? CODE[colour[n]] : '.';
+      highs += top[n] ? (top[n] > 9 ? '+' : String(top[n])) : '.';
+      tallest = Math.max(tallest, top[n]);
     }
-    paint.push(`z ${pad(j)} ` + cells.join(' '));
-    relief.push(`z ${pad(j)} ` + highs.join(' '));
+    paint.push(`${pad(j)}  ${cells}`);
+    relief.push(`${pad(j)}  ${highs}`);
   }
-  return { paint: paint.join('\n'), relief: relief.join('\n') };
+  return { paint: paint.join('\n'), relief: relief.join('\n'), tallest };
 }
 
 /* The model cannot see the board, so this has to carry everything a picture
@@ -1103,43 +1107,24 @@ function sceneSummary() {
   out.push(`BOARD: ${GRID}x${GRID} studs, seen from directly above. x runs 0-${GRID - 1} ` +
            `left to right, z runs 0-${GRID - 1} top to bottom of the map below.`);
   out.push('');
-  const { paint, relief } = topDown();
-  out.push('THE PICTURE AS DRAWN, looking straight down. Each cell is one stud;');
-  out.push('".." is bare baseplate. Two-letter colour codes:');
-  out.push('  rd red  bl blue  yl yellow  gn green  wh white  gy grey');
-  out.push('  bk black  or orange  tn tan  lm lime  az azure  pu purple');
+  const { paint, relief, tallest } = topDown();
+  out.push('THE PICTURE, straight down. One character per stud, "." is bare board.');
+  out.push('r red  b blue  y yellow  g green  w white  s grey(slate)');
+  out.push('k black  o orange  t tan  l lime  a azure  p purple');
   out.push(paint);
-  out.push('');
-  out.push('RELIEF: how high each cell stands, in plates. A plate is 1, a standard brick is 3.');
-  out.push('Most of a drawing sits flat at 3; a higher number is something raised above the rest.');
-  out.push(relief);
-  out.push('');
-  if (!placed.length) {
-    out.push('THE BOARD IS EMPTY. Nothing has been built yet.');
-  } else {
-    out.push(`ON THE BOARD (${placed.length} pieces):`);
-    let minX = GRID, maxX = -1, minZ = GRID, maxZ = -1, top = 0;
-    const tally = {};
-    for (const p of placed) {
-      const s = p.sol;
-      out.push(`- ${pieceName(p.def)} covering x ${s.i0}-${s.i0 + s.w - 1}, ` +
-               `z ${s.j0}-${s.j0 + s.d - 1}, resting at height ${s.h}, top at ${s.h + p.def.p}`);
-      minX = Math.min(minX, s.i0); maxX = Math.max(maxX, s.i0 + s.w - 1);
-      minZ = Math.min(minZ, s.j0); maxZ = Math.max(maxZ, s.j0 + s.d - 1);
-      top = Math.max(top, s.h + p.def.p);
-      const c = COLOUR_NAME[p.def.c];
-      tally[c] = (tally[c] || 0) + 1;
-    }
+  // Only worth sending once something actually stands above one brick; on a flat
+  // drawing it is 16 identical rows saying nothing.
+  if (tallest > 3) {
     out.push('');
-    out.push(`EXTENT: x ${minX}-${maxX}, z ${minZ}-${maxZ}, out of 0-${GRID - 1} in both directions.`);
-    out.push(`TALLEST POINT: ${top} plates, which is ${(top / 3).toFixed(1)} bricks high.`);
-    out.push('COLOURS: ' + Object.entries(tally).map(([c, n]) => `${n} ${c}`).join(', '));
+    out.push('RELIEF, height per stud in plates (a brick is 3). Higher = raised above the rest.');
+    out.push(relief);
+  } else if (tallest) {
+    out.push('Everything is one brick high or less - the picture is flat.');
   }
-  if (loose.length)
-    out.push(`\nSET ASIDE ON THE DESK, not part of the build: ${loose.map(l => pieceName(l.def)).join(', ')}`);
   out.push('');
-  out.push('PIECES IN THE TRAY. Shape and colour are fixed together; you cannot recolour a piece:');
-  out.push(CATALOG.map((d, i) => `  [${i}] ${pieceName(d)}`).join('\n'));
+  if (!placed.length) out.push('The board is empty - nothing drawn yet.');
+  out.push('TRAY, index then colour then size. Shape and colour are fixed together:');
+  out.push(CATALOG.map((d, i) => `${i}=${CODE[COLOUR_NAME[d.c]]}${d.d}x${d.w}${d.p === 1 ? 'flat' : ''}`).join('  '));
   return out.join('\n');
 }
 
@@ -1182,32 +1167,43 @@ Constraints, enforced on my side — any step that breaks one is silently droppe
 
 "reading" is one sentence, at most 12 words, saying what the finished thing is. No hedging, and never mention LEGO, bricks, studs or coordinates.`;
 
+/* Types are UPPERCASE on purpose. Schema.type is a proto enum, so its JSON form
+   is OBJECT / ARRAY / INTEGER; lowercase is quietly ignored rather than
+   rejected, and an ignored schema means the model invents its own field names —
+   which read back as undefined and filter out to nothing. */
 const FINISH_SCHEMA = {
-  type: 'object',
+  type: 'OBJECT',
   properties: {
-    reading: { type: 'string' },
+    reading: { type: 'STRING' },
     steps: {
-      type: 'array',
+      type: 'ARRAY',
       items: {
-        type: 'object',
+        type: 'OBJECT',
         properties: {
-          piece:   { type: 'integer' },
-          x:       { type: 'integer' },
-          z:       { type: 'integer' },
-          level:   { type: 'integer' },
-          rotated: { type: 'boolean' },
+          piece:   { type: 'INTEGER' },
+          x:       { type: 'INTEGER' },
+          z:       { type: 'INTEGER' },
+          level:   { type: 'INTEGER' },
+          rotated: { type: 'BOOLEAN' },
         },
+        propertyOrdering: ['piece', 'x', 'z', 'level', 'rotated'],
         required: ['piece', 'x', 'z', 'level', 'rotated'],
       },
     },
   },
+  propertyOrdering: ['reading', 'steps'],
   required: ['reading', 'steps'],
 };
 
 /* Key goes in a header, never the query string — URLs get logged and shared. */
-async function callGemini(prompt, schema) {
+async function callGemini(prompt, schema, noThink) {
   const body = { contents: [{ role: 'user', parts: [{ text: prompt }] }] };
   if (schema) body.generationConfig = { responseMimeType: 'application/json', responseSchema: schema };
+  // 2.5 bills thinking as output tokens, and a fourteen-word answer needs none.
+  // Only the flash models accept a zero budget, so the guard stays narrow —
+  // planning a whole build keeps its thinking, where it actually earns its cost.
+  if (noThink && /2\.5-flash/.test(cfg.model))
+    body.generationConfig = { ...body.generationConfig, thinkingConfig: { thinkingBudget: 0 } };
   const res = await fetch(`${GEMINI}/models/${cfg.model}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.key },
@@ -1265,7 +1261,7 @@ async function ask(thinkingText, run) {
 }
 
 tap('btnDescribe', () => ask('looking at your build...', async () => {
-  const text = await callGemini(describePrompt(sceneSummary()));
+  const text = await callGemini(describePrompt(sceneSummary()), null, true);
   say(text.replace(/^["'\s]+|["'\s]+$/g, ''));
 }));
 
@@ -1273,17 +1269,33 @@ tap('btnFinish', () => ask('working out how to finish it...', async () => {
   const raw = await callGemini(finishPrompt(sceneSummary()), FINISH_SCHEMA);
   let plan;
   try { plan = JSON.parse(raw); } catch { throw new Error('did not reply with the JSON it was asked for'); }
-  const steps = (plan.steps || [])
-    .filter(s => CATALOG[s.piece])
-    .slice(0, FINISH_MAX)
+  // Read tolerantly. The schema asks for one shape, but a wrong guess about the
+  // wrapper or a field name should not silently become "nothing to place".
+  const list = [plan, plan.steps, plan.pieces, plan.placements, plan.plan]
+    .find(v => Array.isArray(v)) || [];
+  const field = (o, ...names) => { for (const n of names) if (o[n] !== undefined) return o[n]; };
+  const steps = list
+    .map(o => ({
+      piece: Number(field(o, 'piece', 'pieceIndex', 'index', 'id')),
+      x:     Math.round(Number(field(o, 'x', 'col', 'column')) || 0),
+      z:     Math.round(Number(field(o, 'z', 'row', 'y')) || 0),
+      level: Number(field(o, 'level', 'height', 'h')) || 0,
+      rot:   field(o, 'rotated', 'rotate', 'turned') ? 1 : 0,
+    }))
+    .filter(o => CATALOG[o.piece])
     // Ascending level, so supports are laid before whatever rests on them. The
     // level is only used to order: the real landing is still resolved per piece
     // against the board as it stands, so a wrong level costs a placement, never
     // a floating brick.
-    .sort((a, b) => (a.level || 0) - (b.level || 0))
-    .map(s => ({ def: CATALOG[s.piece], x: Math.round(s.x) || 0, z: Math.round(s.z) || 0,
-                 rot: s.rotated ? 1 : 0 }));
-  if (!steps.length) throw new Error('came back with nothing to place');
+    .sort((a, b) => a.level - b.level)
+    .slice(0, FINISH_MAX)
+    .map(o => ({ def: CATALOG[o.piece], x: o.x, z: o.z, rot: o.rot }));
+  if (!steps.length) {
+    // Say which of the two it was, so this is diagnosable rather than a shrug.
+    const got = list.length ? `sent ${list.length} steps I could not read (fields: ${Object.keys(list[0] || {}).join(', ')})`
+                            : `proposed no pieces${plan.reading ? ` - it read the board as "${plan.reading}"` : ''}`;
+    throw new Error(got);
+  }
   buildQueue.length = 0;
   buildQueue.push(...steps);
   buildT = 0;
