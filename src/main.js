@@ -13,6 +13,22 @@ const MAX_STACK  = 30;            // plates
 const GAP        = 0.02;          // visual seam between bricks
 const FALL_G     = 0.024;         // drop acceleration, in fractions of the gap/frame²
 
+/* ---------- flick physics (world units / second) ---------- */
+const GRAVITY    = 120;           // not real gravity: 1u = 8mm, so 9.81m/s² is
+                                  // ~1226u/s² and the arc would be over instantly
+/* Tracked hand speed and launch speed are different scales. A hand crossing the
+   hover plane clocks ~19u/s on an ordinary drag and ~110 on a real flick, but a
+   brick only wants to travel a few studs — so the throw is a scaled-down,
+   clamped version of the hand, not the hand itself. */
+const FLICK_MIN   = 14;           // hand speed below this is a drop, not a throw
+const FLICK_SCALE = 0.22;
+const FLICK_SLOW  = 8;            // gentlest throw: a nudge, ~2 studs
+const FLICK_FAST  = 40;           // hardest: ~10 studs, and easy to overshoot
+const FLICK_LIFT  = 0.18;         // fraction of speed added upward, to make an arc
+const CRASH_ODDS  = 0.2;          // one in five is a dud, as asked
+const ESCAPE      = 24;           // outward kick on a botched landing
+const FLIGHT_MAX = 8;             // seconds before a stray brick is reclaimed
+
 /* ---------- palette ---------- */
 const C = {
   red:'#c4281c', blue:'#0d5cb6', yellow:'#f5cd2f', green:'#237841',
@@ -136,6 +152,21 @@ function popSound(level) {
   src.start(t); src.stop(t + 0.06);
 }
 
+/* A botched landing: duller and broader than the pop, no pitched body — it
+   reads as a scuff rather than a click, which is the whole point.            */
+function clatter() {
+  const a = audio();
+  if (!a) return;
+  const t = a.currentTime + 0.001;
+  const src = a.createBufferSource(), bp = a.createBiquadFilter(), g = a.createGain();
+  src.buffer = noiseBuf;
+  bp.type = 'bandpass'; bp.frequency.value = 850 + Math.random() * 550; bp.Q.value = 0.8;
+  g.gain.setValueAtTime(0.30, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+  src.connect(bp).connect(g).connect(master);
+  src.start(t); src.stop(t + 0.1);
+}
+
 /* =========================== impact springs =========================== */
 /* A spring for the board only — bricks never deform, see `land()`. Damped
    hard enough to read as a knock (one dip, one small rebound) rather than a
@@ -208,6 +239,7 @@ build.add(plateGroup);
 /* ---------- world state ---------- */
 const heights = new Int16Array(GRID * GRID);      // stacked height per column, in plates
 const placed  = [];                               // { group, def, i0, j0, h0 }
+const flying  = [];                               // bricks mid-throw
 const hitList = [];                               // meshes eligible for raycast
 plateGroup.traverse(o => { if (o.isMesh && o.userData.isBase) hitList.push(o); });
 
@@ -258,6 +290,7 @@ const nav   = new Map();   // pointerId -> {x,y}
 const drags = new Map();   // pointerId -> {def, tile, held, ghost, sol, rot, az0}
 let pinch = null;          // {dist, rad, mx, az}
 let manualRot = 0;         // optional 90° offset; the plate's angle does the rest
+let flickOn = true;        // throwing; off = every release is a plain drop
 let selected = 0;
 
 /* ---------- navigation (stage) ---------- */
@@ -300,7 +333,7 @@ const ndc = new THREE.Vector2();
 const HOVER = 2.6;                                  // how high a held brick floats
 const LIFT  = 1.5;                                  // ...and how far above the fingertip
 const hoverPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-const tmpV = new THREE.Vector3(), camUp = new THREE.Vector3();
+const tmpV = new THREE.Vector3(), camUp = new THREE.Vector3(), flingV = new THREE.Vector3();
 
 /* aim `ray` at a screen point — false if that point isn't over the 3D stage */
 function castFrom(clientX, clientY) {
@@ -311,15 +344,9 @@ function castFrom(clientX, clientY) {
   return true;
 }
 
-/* where does the brick currently under `ray` land? null if it misses the build */
-function solveRay(def, rot) {
-  const hit = ray.intersectObjects(hitList, false)[0];
-  if (!hit) return null;
-
-  // nudge into the column we actually hit (side faces sit exactly on a seam)
-  const px = hit.point.x - hit.face.normal.x * 0.02;
-  const pz = hit.point.z - hit.face.normal.z * 0.02;
-
+/* where does a footprint centred on this point land? `build` has no x/z offset,
+   so world and board coordinates agree on the two axes that matter here.     */
+function solveAt(px, pz, def, rot) {
   const w = rot ? def.d : def.w;
   const d = rot ? def.w : def.d;
   const i0 = clamp(Math.round(px + GRID / 2 - w / 2), 0, GRID - w);
@@ -335,7 +362,16 @@ function solveRay(def, rot) {
   const ok = h + def.p <= MAX_STACK;
   return { i0, j0, w, d, h, ok };
 }
+/* ...and where does the brick under `ray` land? null if it misses the build */
+function solveRay(def, rot) {
+  const hit = ray.intersectObjects(hitList, false)[0];
+  if (!hit) return null;
+  // nudge into the column we actually hit (side faces sit exactly on a seam)
+  return solveAt(hit.point.x - hit.face.normal.x * 0.02,
+                 hit.point.z - hit.face.normal.z * 0.02, def, rot);
+}
 const solve = (x, y, def, rot) => castFrom(x, y) ? solveRay(def, rot) : null;
+const overBoard = p => Math.abs(p.x) <= GRID / 2 && Math.abs(p.z) <= GRID / 2;
 
 const placeX = (i0, w) => i0 - GRID / 2 + w / 2;
 
@@ -376,7 +412,8 @@ function beginDrag(e, def, srcEl) {
   // grid as the plate spins under it, so the pickup orientation moves with the
   // camera without disturbing that.
   const s = { def, tile, src:srcEl, x:e.clientX, y:e.clientY, az0:view.az,
-              rot0:screenParity(def), held:null, ghost:null, rot:-1, sol:null };
+              rot0:screenParity(def), held:null, ghost:null, rot:-1, sol:null,
+              vel:new THREE.Vector3(), lastPos:new THREE.Vector3(), lastT:0 };
   drags.set(e.pointerId, s);
   refreshDrag(s);
 }
@@ -419,6 +456,20 @@ function refreshDrag(s) {
       camUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
       s.held.position.set(tmpV.x, y - hh / 2, tmpV.z).addScaledVector(camUp, LIFT);
     }
+    // Velocity comes off the brick's own world position, not the screen, so a
+    // throw already accounts for the camera. Smoothed, and refreshDrag runs
+    // every frame — so a finger that stops moving decays to nothing within a
+    // few frames and a still release is a drop, never a throw.
+    const t = performance.now();
+    if (s.lastT) {
+      const dt = (t - s.lastT) / 1000;
+      if (dt > 0.001) s.vel.lerp(flingV.subVectors(s.held.position, s.lastPos).divideScalar(dt), 0.4);
+    }
+    s.lastT = t;
+    s.lastPos.copy(s.held.position);
+  } else {
+    s.lastT = 0;                                    // re-entering shouldn't read as speed
+    s.vel.set(0, 0, 0);
   }
 
   s.ghost.visible = !!sol;
@@ -436,11 +487,15 @@ function closeDrag(s, id) {
   s.tile.remove();
   s.src.classList.remove('press');
 }
-function endDrag(e) {                       // released: drop it if it fits
+function endDrag(e) {                       // released: throw it, or drop it if it fits
   const s = drags.get(e.pointerId);
   if (!s) return;
+  const from  = s.held.visible ? s.held.position.clone() : null;   // closeDrag frees it
+  const thrown = flickOn && from && s.vel.length() >= FLICK_MIN;
+  const vel = s.vel.clone(), { def, sol, rot } = s;
   closeDrag(s, e.pointerId);
-  if (s.sol && s.sol.ok) place(s.def, s.sol, s.rot, s.held.visible ? s.held.position : null);
+  if (thrown)              launch(def, rot, from, vel);
+  else if (sol && sol.ok)  place(def, sol, rot, from);
 }
 function abortDrag(e) {                     // cancelled, not released: drop nothing
   const s = drags.get(e.pointerId);
@@ -449,22 +504,30 @@ function abortDrag(e) {                     // cancelled, not released: drop not
 function abortAllDrags() {
   for (const [id, s] of drags) closeDrag(s, id);
 }
-function place(def, sol, rot, from) {
-  const d2 = rot ? { ...def, w:def.d, d:def.w } : def;
-  const g = buildBrick(d2);
+/* Seat a brick in the grid for good. Both a dropped brick and one that sticks
+   its landing come through here, so they end up identically undoable.        */
+function commit(g, def, sol) {
   const base = new THREE.Vector3(placeX(sol.i0, sol.w), sol.h * PLATE, placeX(sol.j0, sol.d));
   g.position.copy(base);
-  // fall into the socket from wherever the hand released it (`from` is world,
-  // `base` is board-local — they differ by however far the board is bouncing)
-  const off = from ? from.clone().sub(base) : new THREE.Vector3(0, 0.9, 0);
-  if (from) off.y -= build.position.y;
-  g.position.add(off);
+  g.rotation.set(0, 0, 0);
   build.add(g);
   hitList.push(g.userData.pickBody);
   for (let i = sol.i0; i < sol.i0 + sol.w; i++)
     for (let j = sol.j0; j < sol.j0 + sol.d; j++) setH(i, j, sol.h + def.p);
-  const p = { g, def, sol, base, anim: { off, t: 0, v: 0.015 } };
+  const p = { g, def, sol, base, anim: null };
   placed.push(p);
+  return p;
+}
+const turned = (def, rot) => rot ? { ...def, w:def.d, d:def.w } : def;
+
+function place(def, sol, rot, from) {
+  const p = commit(buildBrick(turned(def, rot)), def, sol);
+  // fall into the socket from wherever the hand released it (`from` is world,
+  // `base` is board-local — they differ by however far the board is bouncing)
+  const off = from ? from.clone().sub(p.base) : new THREE.Vector3(0, 0.9, 0);
+  if (from) off.y -= build.position.y;
+  p.g.position.copy(p.base).add(off);
+  p.anim = { off, t: 0, v: 0.015 };
 }
 /* the click. Fires when it actually touches down, not when the finger let go.
    The brick itself does nothing — ABS doesn't squash, so the energy goes into
@@ -475,6 +538,72 @@ function land(p) {
   popSound(p.sol.h + p.def.p);
   navigator.vibrate?.(12);
 }
+/* ---------- the flick ---------- */
+/* Whether a throw sticks is decided here, at launch, not on arrival — a dud is
+   committed to before it ever touches down, so it tumbles the whole way in. */
+function launch(def, rot, from, vel) {
+  const g = buildBrick(turned(def, rot));
+  g.position.copy(from);
+  g.position.y -= build.position.y;             // world -> board-local
+  build.add(g);
+  const speed = clamp(vel.length() * FLICK_SCALE, FLICK_SLOW, FLICK_FAST);
+  vel.setLength(speed).y += speed * FLICK_LIFT;  // a little loft, so it arcs
+  flying.push({ g, def, rot, vel, spin:null, bounces:0, age:0,
+                sticks: Math.random() >= CRASH_ODDS });
+}
+
+/* A landing that doesn't take: kick it away from the middle of the board so it
+   can't settle back down, and give it a tumble it never recovers from.       */
+function botch(f, top) {
+  const p = f.g.position;
+  p.y = top + 0.001;
+  f.bounces++;
+  f.sticks = false;
+  const out = new THREE.Vector3(p.x, 0, p.z);
+  if (out.lengthSq() < 1) out.set(f.vel.x, 0, f.vel.z);
+  if (out.lengthSq() < 1e-6) out.set(1, 0, 0);
+  out.normalize();
+  f.vel.set(out.x * ESCAPE + f.vel.x * 0.25,
+            Math.abs(f.vel.y) * 0.4 + 18,        // enough hang time to clear the board
+            out.z * ESCAPE + f.vel.z * 0.25);
+  f.spin = new THREE.Vector3((Math.random() * 2 - 1) * 7,
+                             (Math.random() * 2 - 1) * 6,
+                             (Math.random() * 2 - 1) * 7);
+  boardY.v -= 0.05;
+  clatter();
+}
+
+function stepFlight(dt) {
+  for (let n = flying.length - 1; n >= 0; n--) {
+    const f = flying[n];
+    f.age += dt;
+    f.vel.y -= GRAVITY * dt;
+    f.g.position.addScaledVector(f.vel, dt);
+    if (f.spin) {                                 // rigid tumble — still no squashing
+      f.g.rotation.x += f.spin.x * dt;
+      f.g.rotation.y += f.spin.y * dt;
+      f.g.rotation.z += f.spin.z * dt;
+    }
+
+    const p = f.g.position;
+    if (f.vel.y < 0 && overBoard(p)) {
+      const sol = solveAt(p.x, p.z, f.def, f.rot);
+      if (p.y <= sol.h * PLATE) {
+        if (f.sticks && sol.ok) {
+          land(commit(f.g, f.def, sol));          // clicks in exactly like a drop
+          flying.splice(n, 1);
+          continue;
+        }
+        botch(f, sol.h * PLATE);
+      }
+    }
+    if (p.y < -25 || f.age > FLIGHT_MAX) {        // gone off the table for good
+      build.remove(f.g);
+      flying.splice(n, 1);
+    }
+  }
+}
+
 function undo() {
   const last = placed.pop();
   if (!last) return;
@@ -536,6 +665,9 @@ const rotStateEl = document.getElementById('rotState');
 const tap = (id, fn) => document.getElementById(id)
   .addEventListener('pointerdown', e => { e.preventDefault(); fn(); });
 tap('btnRotate', () => { manualRot ^= 1; rotStateEl.textContent = manualRot ? '90°' : '0°'; });
+const flickStateEl = document.getElementById('flickState');
+const toggleFlick = () => { flickOn = !flickOn; flickStateEl.textContent = flickOn ? 'ON' : 'OFF'; };
+tap('btnFlick', toggleFlick);
 tap('btnUndo', undo);
 tap('btnClear', () => { while (placed.length) undo(); });
 tap('btnHome', () => { view.taz = HOME.az; view.tpol = HOME.pol; view.trad = HOME.rad; });
@@ -546,6 +678,7 @@ tap('btnFull', () => {
 addEventListener('keydown', e => {
   if (e.key === 'r' || e.key === 'R') { manualRot ^= 1; rotStateEl.textContent = manualRot ? '90°' : '0°'; }
   if (e.key === 'z' || e.key === 'Z') undo();
+  if (e.key === 'f' || e.key === 'F') toggleFlick();
 });
 
 /* =========================== loop =========================== */
@@ -561,7 +694,10 @@ resize();
 const statsEl = document.getElementById('stats');
 let fpsT = performance.now(), frames = 0;
 
+let lastT = performance.now();
 function tick(now) {
+  const dt = Math.min((now - lastT) / 1000, 0.05);   // a throttled tab must not teleport
+  lastT = now;
   applyCamera();
   for (const s of drags.values()) refreshDrag(s);   // plate may have moved under the finger
   if (spring(boardY)) build.position.y = boardY.y;                 // board rebound
@@ -579,6 +715,7 @@ function tick(now) {
     p.anim = null;
     land(p);
   }
+  stepFlight(dt);
   renderer.render(scene, camera);
   if (++frames >= 30) {
     statsEl.textContent = `${Math.round(frames * 1000 / (now - fpsT))} fps · ${placed.length} bricks · ${drags.size + nav.size} touches`;
@@ -596,4 +733,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, heights, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, popSound, boardY, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, flying, heights, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, popSound, boardY, solveAt, launch, stepFlight, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
