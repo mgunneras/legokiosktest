@@ -104,3 +104,59 @@ html,body{
 #start h2{ font-size:15px; letter-spacing:.24em; font-weight:700; color:var(--accent); }
 #start p{ margin-top:12px; font-size:12px; letter-spacing:.09em; color:var(--dim); }
 @media (prefers-reduced-motion: reduce){ #start{ transition:none; } }
+
+/* ---------- key button + debug panel ---------- */
+#menuHead{ position:relative; }
+#btnKey{
+  position:absolute; top:16px; right:14px;
+  width:24px; height:24px; padding:0; display:grid; place-items:center;
+  border-radius:50%; border:1px solid var(--line); background:var(--panel-2);
+  color:var(--dim); cursor:pointer;
+}
+#btnKey.set{ color:#1f8a4c; border-color:#9ed6b4; background:#eaf7ef; }
+#btnKey.unset{ color:var(--accent); border-color:#eab6b1; background:var(--panel-sel); }
+#btnKey:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+
+#debug{ position:fixed; inset:0; z-index:30; display:grid; place-items:center;
+  background:rgba(23,32,44,.32); }
+/* an explicit display beats the UA rule for [hidden], so say it again here —
+   without this the panel is on screen from load and never closes */
+#debug[hidden]{ display:none; }
+#debugPanel{
+  width:min(320px, 88vw); background:var(--panel); color:var(--ink);
+  border:1px solid var(--line); border-radius:12px; padding:16px;
+  display:flex; flex-direction:column; gap:8px;
+  box-shadow:0 18px 44px rgba(21,32,48,.24);
+}
+#debugPanel h3{ font-size:12px; letter-spacing:.22em; color:var(--accent); margin-bottom:4px; }
+#debugPanel label{ font-size:10px; letter-spacing:.1em; color:var(--dim); }
+#debugPanel input, #debugPanel select{
+  font:inherit; font-size:12px; width:100%; padding:9px 8px;
+  color:var(--ink); background:var(--panel-2);
+  border:1px solid var(--line); border-radius:7px;
+}
+#debugPanel input:focus-visible, #debugPanel select:focus-visible{
+  outline:2px solid var(--accent); outline-offset:1px;
+}
+#debugNote{ font-size:10px; line-height:1.5; color:var(--dim); }
+.debugRow{ display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:4px; }
+.tool.ai{ grid-column:1 / -1; color:var(--accent); }
+.tool[disabled]{ opacity:.45; }
+
+/* ---------- what Gemini says ---------- */
+#bubble{
+  position:fixed; top:0; left:50%; transform:translateX(-50%); z-index:25;
+  max-width:min(560px, 82vw); padding:11px 18px 12px;
+  background:var(--panel); color:var(--ink);
+  border:1px solid var(--line); border-top:none;
+  border-radius:0 0 13px 13px;
+  box-shadow:0 10px 26px rgba(21,32,48,.18);
+  font-size:13px; line-height:1.45; text-align:center;
+  animation:bubbleIn .22s ease;
+}
+#bubble.thinking{ color:var(--dim); font-style:italic; }
+@keyframes bubbleIn{ from{ transform:translate(-50%,-100%); opacity:0; } }
+@media (prefers-reduced-motion: reduce){ #bubble{ animation:none; } }
+
+/* the app kills touch panning globally; the panel needs it back to be typed in */
+#debug, #debug *{ touch-action:auto; -webkit-user-select:text; user-select:text; }

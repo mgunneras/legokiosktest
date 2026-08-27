@@ -1045,6 +1045,244 @@ addEventListener('keydown', e => {
   if (e.key === 'f' || e.key === 'F') toggleFlick();
 });
 
+/* =========================== Gemini =========================== */
+/* Runs entirely in the browser, so the key lives in localStorage. That is the
+   normal shape for a client-only prototype, and it is worth being clear-eyed
+   about the trade: anyone with the kiosk or its devtools can read that key, and
+   every request carries it from the device. Fine for a prototype on your own
+   hardware; for anything public the call belongs behind a server you own. */
+const GEMINI = 'https://generativelanguage.googleapis.com/v1beta';
+const CFG_KEY = 'brickkiosk.gemini';
+const cfg = { key: '', model: '' };
+try { Object.assign(cfg, JSON.parse(localStorage.getItem(CFG_KEY) || '{}')); } catch {}
+const saveCfg = () => { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch {} };
+
+const COLOUR_NAME = {};
+for (const [n, hex] of Object.entries(C)) COLOUR_NAME[hex] = n;
+const pieceName = d => `${COLOUR_NAME[d.c]} ${d.d}x${d.w} ${d.p === 1 ? 'plate' : 'brick'}`;
+
+/* The model cannot see the board, so this has to carry everything a picture
+   would: not just an inventory, but where things sit, how high they reach and
+   what is grouped with what. The derived lines at the end matter as much as the
+   list — they are what let it reason about shape instead of parts. */
+function sceneSummary() {
+  const out = [];
+  out.push(`BOARD: ${GRID}x${GRID} studs. Coordinates are stud indices: x runs 0-${GRID - 1} ` +
+           `left to right, z runs 0-${GRID - 1} front to back.`);
+  out.push('Heights are counted in plates: a plate is 1 tall, a standard brick is 3.');
+  out.push('');
+  if (!placed.length) {
+    out.push('THE BOARD IS EMPTY. Nothing has been built yet.');
+  } else {
+    out.push(`ON THE BOARD (${placed.length} pieces):`);
+    let minX = GRID, maxX = -1, minZ = GRID, maxZ = -1, top = 0;
+    const tally = {};
+    for (const p of placed) {
+      const s = p.sol;
+      out.push(`- ${pieceName(p.def)} covering x ${s.i0}-${s.i0 + s.w - 1}, ` +
+               `z ${s.j0}-${s.j0 + s.d - 1}, resting at height ${s.h}, top at ${s.h + p.def.p}`);
+      minX = Math.min(minX, s.i0); maxX = Math.max(maxX, s.i0 + s.w - 1);
+      minZ = Math.min(minZ, s.j0); maxZ = Math.max(maxZ, s.j0 + s.d - 1);
+      top = Math.max(top, s.h + p.def.p);
+      const c = COLOUR_NAME[p.def.c];
+      tally[c] = (tally[c] || 0) + 1;
+    }
+    out.push('');
+    out.push(`EXTENT: x ${minX}-${maxX}, z ${minZ}-${maxZ}, out of 0-${GRID - 1} in both directions.`);
+    out.push(`TALLEST POINT: ${top} plates, which is ${(top / 3).toFixed(1)} bricks high.`);
+    out.push('COLOURS: ' + Object.entries(tally).map(([c, n]) => `${n} ${c}`).join(', '));
+  }
+  if (loose.length)
+    out.push(`\nSET ASIDE ON THE DESK, not part of the build: ${loose.map(l => pieceName(l.def)).join(', ')}`);
+  out.push('');
+  out.push('PIECES IN THE TRAY. Shape and colour are fixed together; you cannot recolour a piece:');
+  out.push(CATALOG.map((d, i) => `  [${i}] ${pieceName(d)}`).join('\n'));
+  return out.join('\n');
+}
+
+const describePrompt = scene => `Someone is building on a LEGO baseplate. Here is exactly what is on it.
+
+${scene}
+
+Tell them what it looks like it depicts.
+
+Read it the way you would read a picture rather than an inventory: where pieces sit, how high they reach, and what colour they are all carry meaning. A band of blue along one edge could be water. A tall grey stack could be a tower. A flat green spread could be a field. Colour is a strong hint; height and grouping are stronger.
+
+Rules:
+- One sentence, 14 words maximum.
+- Commit to a single reading. No hedging, no listing possibilities, no "either ... or".
+- Never mention LEGO, bricks, studs, plates, coordinates or the baseplate.
+- If almost nothing has been built, say so with some charm instead of inventing a scene.
+
+Reply with the sentence and nothing else.`;
+
+const addPrompt = scene => `Someone is building on a LEGO baseplate. Here is exactly what is on it.
+
+${scene}
+
+Add exactly one more piece.
+
+Decide first what the build depicts, then pick the piece and spot that best develop that idea: extend a wall, raise a roofline, start a second tree, break up a flat facade. Prefer a placement that touches or builds on what is already there over one stranded in open space. On an empty board, start something worth continuing.
+
+Placement rules, strictly enforced:
+- "piece" is an index into the tray list above.
+- "x" and "z" are the stud coordinates of the piece's lowest corner. The whole piece must fit within 0-${GRID - 1} on both axes.
+- "rotated" true swaps the piece's width and depth.
+- A piece rests on the highest thing under its footprint, so placing it over something stacks it automatically.
+- "why" is one short clause, 10 words maximum, plain language, no LEGO jargon.`;
+
+const ADD_SCHEMA = {
+  type: 'object',
+  properties: {
+    piece:   { type: 'integer' },
+    x:       { type: 'integer' },
+    z:       { type: 'integer' },
+    rotated: { type: 'boolean' },
+    why:     { type: 'string'  },
+  },
+  required: ['piece', 'x', 'z', 'rotated', 'why'],
+};
+
+/* Key goes in a header, never the query string — URLs get logged and shared. */
+async function callGemini(prompt, schema) {
+  const body = { contents: [{ role: 'user', parts: [{ text: prompt }] }] };
+  if (schema) body.generationConfig = { responseMimeType: 'application/json', responseSchema: schema };
+  const res = await fetch(`${GEMINI}/models/${cfg.model}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.key },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    let msg = `${res.status}`;
+    try { msg = JSON.parse(detail).error.message; } catch {}
+    throw new Error(msg.slice(0, 140));
+  }
+  const j = await res.json();
+  const text = (j.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
+  if (!text) throw new Error('came back empty');
+  return text;
+}
+/* Asked for rather than hard-coded, so the list is whatever this key can use. */
+async function listModels(key) {
+  const res = await fetch(`${GEMINI}/models`, { headers: { 'x-goog-api-key': key } });
+  if (!res.ok) throw new Error(String(res.status));
+  const j = await res.json();
+  return (j.models || [])
+    .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+    .map(m => m.name.replace(/^models\//, ''))
+    .filter(n => !/embedding|aqa|imagen|veo|tts/i.test(n))
+    .sort();
+}
+
+/* ---------- what Gemini says ---------- */
+const bubbleEl = document.getElementById('bubble');
+const bubbleTextEl = document.getElementById('bubbleText');
+let bubbleTimer = 0;
+function say(text, hold = 5000, thinking = false) {
+  clearTimeout(bubbleTimer);
+  bubbleTextEl.textContent = text;
+  bubbleEl.classList.toggle('thinking', thinking);
+  bubbleEl.hidden = false;
+  if (hold) bubbleTimer = setTimeout(() => { bubbleEl.hidden = true; }, hold);
+}
+
+/* ---------- the two asks ---------- */
+const describeBtn = document.getElementById('btnDescribe');
+const addBrickBtn = document.getElementById('btnAddBrick');
+let asking = false;
+async function ask(thinkingText, run) {
+  if (asking) return;
+  if (!cfg.key || !cfg.model) { openDebug(); say('Add a Gemini API key and pick a model first.'); return; }
+  asking = true;
+  describeBtn.disabled = addBrickBtn.disabled = true;
+  say(thinkingText, 0, true);
+  try { await run(); }
+  catch (e) { say(`Gemini: ${e.message}`, 7000); }
+  finally { asking = false; describeBtn.disabled = addBrickBtn.disabled = false; }
+}
+
+tap('btnDescribe', () => ask('looking at your build...', async () => {
+  const text = await callGemini(describePrompt(sceneSummary()));
+  say(text.replace(/^["'\s]+|["'\s]+$/g, ''));
+}));
+
+tap('btnAddBrick', () => ask('deciding what to add...', async () => {
+  const raw = await callGemini(addPrompt(sceneSummary()), ADD_SCHEMA);
+  let plan;
+  try { plan = JSON.parse(raw); } catch { throw new Error('did not reply with the JSON it was asked for'); }
+  const def = CATALOG[plan.piece];
+  if (!def) throw new Error(`asked for piece ${plan.piece}, which is not in the tray`);
+  const rot = plan.rotated ? 1 : 0;
+  const w = rot ? def.d : def.w, d = rot ? def.w : def.d;
+  // Trust it to choose, not to be in bounds: clamp, then resolve the landing the
+  // same way a dragged brick does, so nothing can be placed illegally.
+  const i0 = clamp(Math.round(plan.x) || 0, 0, GRID - w);
+  const j0 = clamp(Math.round(plan.z) || 0, 0, GRID - d);
+  const sol = solveAt(placeX(i0, w), placeX(j0, d), def, rot);
+  if (!sol.ok) throw new Error('that spot is already at the height limit');
+  place(def, sol, rot, null);
+  say(plan.why ? `${plan.why} — ${pieceName(def)}` : `Added a ${pieceName(def)}.`);
+}));
+
+/* ---------- key + model panel ---------- */
+const keyBtn    = document.getElementById('btnKey');
+const debugEl   = document.getElementById('debug');
+const apiKeyEl  = document.getElementById('apiKey');
+const modelSel  = document.getElementById('modelSel');
+const debugNote = document.getElementById('debugNote');
+
+function paintKeyBtn() {
+  keyBtn.classList.toggle('set', !!cfg.key);
+  keyBtn.classList.toggle('unset', !cfg.key);
+  keyBtn.title = cfg.key ? `Gemini key saved - ${cfg.model || 'no model picked'}` : 'No Gemini API key';
+}
+function fillModels(names) {
+  modelSel.innerHTML = '';
+  if (!names.length) {
+    modelSel.appendChild(Object.assign(document.createElement('option'),
+      { value: '', textContent: 'add a key to load models' }));
+    return;
+  }
+  for (const n of names)
+    modelSel.appendChild(Object.assign(document.createElement('option'), { value: n, textContent: n }));
+  modelSel.value = names.includes(cfg.model) ? cfg.model
+                 : (names.find(n => /flash/.test(n)) || names[0]);
+}
+async function loadModels(key) {
+  debugNote.textContent = 'Loading models...';
+  try {
+    const names = await listModels(key);
+    fillModels(names);
+    debugNote.textContent = `${names.length} models available. Key is stored in this browser only.`;
+  } catch (e) {
+    fillModels([]);
+    debugNote.textContent = `Could not list models (${e.message}). Check the key.`;
+  }
+}
+function openDebug() {
+  apiKeyEl.value = cfg.key;
+  debugEl.hidden = false;
+  if (cfg.key) loadModels(cfg.key);
+  else { fillModels([]); debugNote.textContent = 'Key is stored in this browser only.'; }
+}
+keyBtn.addEventListener('click', openDebug);
+apiKeyEl.addEventListener('change', () => {
+  const k = apiKeyEl.value.trim();
+  if (k) loadModels(k);
+});
+document.getElementById('btnKeyClose').addEventListener('click', () => { debugEl.hidden = true; });
+debugEl.addEventListener('click', e => { if (e.target === debugEl) debugEl.hidden = true; });
+document.getElementById('debugPanel').addEventListener('submit', e => {
+  e.preventDefault();
+  cfg.key = apiKeyEl.value.trim();
+  cfg.model = modelSel.value || '';
+  saveCfg();
+  paintKeyBtn();
+  debugEl.hidden = true;
+});
+paintKeyBtn();
+
 /* =========================== start screen =========================== */
 /* One plain tap, which is the one interaction iOS accepts as permission to
    make sound. Building never produces one: a drag calls preventDefault (which
@@ -1120,4 +1358,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };

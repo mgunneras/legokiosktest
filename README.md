@@ -218,6 +218,42 @@ relative, which is what makes it work under a `/legokiosktest/` subpath.
 
 Pushing to `main` redeploys it, usually within a minute.
 
+## Gemini
+
+The key button sits top-right of the tray: red with no key, green once one is
+saved. It opens a panel for the key and a model picker. The model list is
+*fetched* from the API rather than hard-coded, so it is whatever that key can
+actually use, filtered to models supporting `generateContent`.
+
+Two asks, both in the tray footer:
+
+- **WHAT IS THIS?** sends a semantic snapshot of the board and asks for one
+  sentence saying what it depicts. The reply lands in a bubble at the top of the
+  screen for five seconds.
+- **ADD A BRICK** sends the same snapshot and asks for one piece and a spot,
+  with a `responseSchema` so the reply is structured rather than parsed out of
+  prose. The answer is treated as a suggestion, not an instruction: the index is
+  checked against the tray, x/z are clamped, and the landing is resolved through
+  the same `solveAt` a dragged brick uses, so nothing illegal can be placed.
+
+`sceneSummary()` is the interesting half. The model cannot see the board, so the
+snapshot carries what a picture would: every piece with its colour, footprint and
+height, then the derived lines that let it reason about shape rather than parts —
+overall extent, tallest point, colour tally, and what is set aside on the desk.
+The prompt tells it to read position, height and colour as *meaning* (a blue band
+low along one edge is probably water) and to commit to one reading.
+
+**The key lives in `localStorage`.** That is the normal shape for a client-only
+prototype and it is what makes this work with no backend — but be clear-eyed:
+anyone with the kiosk, or its devtools, can read that key, and every request
+carries it from the device. Fine on your own hardware; for anything public the
+call belongs behind a server you own. The key is sent as an `x-goog-api-key`
+header rather than a query parameter, so it stays out of URLs and logs.
+
+**This needs network access, so it does not work inside a published Claude
+artifact** — that page has a strict CSP that blocks external hosts. Use the
+GitHub Pages URL or `npm run dev`.
+
 ## Kiosk deployment notes
 
 - **Target: Chromium/Electron.** Only mainstream runtime with real multi-touch

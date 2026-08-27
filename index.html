@@ -11,6 +11,13 @@
     <aside id="menu">
       <header id="menuHead">
         <h1>BRICKS</h1>
+        <button id="btnKey" aria-label="Gemini API key" title="Gemini API key">
+          <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false">
+            <circle cx="8.5" cy="8.5" r="4.2" fill="none" stroke="currentColor" stroke-width="2"/>
+            <path d="M11.6 11.6 19 19M15.4 15.4l1.8-1.8M18 18l1.6-1.6"
+                  fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
         <p id="hint">drag a brick onto the plate.<br>drop bricks on bricks to build up.<br>spin the plate to turn it 90&#176;<br>flick as you let go to throw it.</p>
       </header>
       <div id="palette"></div>
@@ -20,6 +27,8 @@
         <button class="tool" id="btnClear">CLEAR</button>
         <button class="tool" id="btnHome">RESET VIEW</button>
         <button class="tool" id="btnFull">FULLSCREEN</button>
+        <button class="tool ai" id="btnDescribe">WHAT IS THIS?</button>
+        <button class="tool ai" id="btnAddBrick">ADD A BRICK</button>
       </footer>
     </aside>
     <main id="stage">
@@ -28,6 +37,22 @@
     </main>
   </div>
   <div id="chips"></div>
+  <div id="bubble" hidden><span id="bubbleText"></span></div>
+  <div id="debug" hidden>
+    <form id="debugPanel" autocomplete="off">
+      <h3>GEMINI</h3>
+      <label for="apiKey">API key</label>
+      <input id="apiKey" type="password" autocomplete="off" spellcheck="false"
+             placeholder="paste your key" />
+      <label for="modelSel">Model</label>
+      <select id="modelSel"><option value="">add a key to load models</option></select>
+      <p id="debugNote">Stored in this browser only.</p>
+      <div class="debugRow">
+        <button class="tool" type="submit" id="btnKeySave">SAVE</button>
+        <button class="tool" type="button" id="btnKeyClose">CLOSE</button>
+      </div>
+    </form>
+  </div>
   <div id="start"><div>
     <h2>BRICK KIOSK</h2>
     <p>tap anywhere to begin</p>
