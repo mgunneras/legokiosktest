@@ -1,0 +1,13 @@
+{
+  "name": "brick-kiosk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Multi-touch 3D LEGO build prototype for locked-down kiosks",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "node electron/server.js",
+    "kiosk": "electron ."
+  },
+  "devDependencies": { "electron": "^32.0.0" }
+}

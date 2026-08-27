@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Brick Kiosk — Multi-touch 3D Prototype</title>
+<link rel="stylesheet" href="src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="menu">
+      <header id="menuHead">
+        <h1>BRICKS</h1>
+        <p id="hint">drag a brick onto the plate.<br>drop bricks on bricks to build up.<br>spin the plate to turn it 90°</p>
+      </header>
+      <div id="palette"></div>
+      <footer id="menuFoot">
+        <button class="tool" id="btnRotate">ROTATE <span id="rotState">0°</span></button>
+        <button class="tool" id="btnUndo">UNDO</button>
+        <button class="tool" id="btnClear">CLEAR</button>
+        <button class="tool" id="btnHome">RESET VIEW</button>
+        <button class="tool" id="btnFull">FULLSCREEN</button>
+      </footer>
+    </aside>
+    <main id="stage">
+      <canvas id="gl"></canvas>
+      <div id="stats"></div>
+    </main>
+  </div>
+  <div id="chips"></div>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
