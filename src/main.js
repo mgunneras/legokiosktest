@@ -1283,71 +1283,25 @@ Rules:
 
 Reply with the sentence and nothing else.`;
 
-const FINISH_MAX = 30;
-const finishPrompt = scene => `Someone is part-way through a drawing made from coloured plastic pieces on a 16x16 board, seen from directly above. Here is exactly what is on it.
+/* What it is, and what to do about it. The suggestion is the point: it has to
+   be concrete enough to act on, kind about what is already there, and buildable
+   out of coloured blocks — no faces, no lettering, no filigree. */
+const hintPrompt = scene => `Someone is building a picture out of coloured plastic pieces on a small board, seen from straight above. Here is what they have so far.
 
 ${scene}
 
-Finish the picture.
+Give them one idea for what to add next.
 
-Decide first what it shows, then work out what is missing and give the placements that complete it.
+Say what you think it is, then suggest one thing that plays off it: a mouse for the cat to chase, a boat for the lake, a chimney for the roof, a friend to stand beside it. Look at where the board is still empty and point roughly there - "along the top", "just to its left", "in the near corner".
 
-Work in the top-down view. You are finishing a drawing on a 16x16 grid, not engineering a model: extend bands of colour to the edges where they clearly want to reach, fill regions that are obviously meant to be solid, close outlines, complete symmetry that has been started, and add the few marks that make the subject unmistakable. Think in areas of colour, not in individual pieces — choose the largest piece that fits the area you are filling.
+Rules:
+- Two short sentences at most, 25 words in total.
+- Warm and playful. Be pleased with what is already there. Never sarcastic, and never say it looks unfinished, empty or wrong.
+- It has to be buildable out of simple coloured blocks at this size: no lettering, no faces, no small detail.
+- Never mention LEGO, bricks, studs, cells, coordinates or the board itself.
+- If almost nothing has been built, suggest one simple thing worth starting.
 
-Height is emphasis, not construction. Keep nearly everything flat at level 0 and only raise something where it genuinely stands above the rest of the picture. A drawing that is mostly one layer will read far better than a lumpy one.
-
-Constraints, enforced on my side — any step that breaks one is silently dropped, so a careless plan comes out full of holes:
-- At most ${FINISH_MAX} steps. Fewer is fine and usually better: stop when it reads as finished rather than filling the board.
-- "piece" is an index into the tray list above. Shape and colour are fixed together; you cannot recolour a piece.
-- "x" and "z" are the stud coordinates of the piece's lowest corner. The whole piece must fit on the board, so x + width - 1 <= ${GRID - 1} and z + depth - 1 <= ${GRID - 1}.
-- "rotated" false lays the piece as the tray gives it: x-extent along x, z-extent along z. "rotated" true turns it a quarter turn, so it then covers its z-extent along x and its x-extent along z. Piece x3z1 unrotated is a bar three cells wide running left to right; rotated it is a bar three cells tall running top to bottom. Most drawings need both.
-- Two pieces at the same level must not overlap. A piece dropped onto an occupied square does not share it, it lands on top of what is there — so overlapping steps build an accidental pile instead of a picture. A step whose square is already taken at its stated level is discarded.
-- A slope's angled face is not a surface: nothing can rest on it, only on the
-  flat studded part. Same for the round tiles, which have no studs at all.
-- "level" is the height in plates the piece rests at: 0 is directly on the baseplate, 3 is on top of one standard brick, 6 on top of two, and so on. A piece rests on whatever is highest beneath its footprint, so anything above level 0 needs something under it at that spot.
-- I lay your steps in ascending "level" order, so supports go down before whatever sits on them. Get the levels right and the build assembles itself correctly.
-
-Worked example. On an empty board these three steps:
-  {"piece":2,"x":5,"z":6,"level":0,"rotated":false}
-  {"piece":0,"x":6,"z":7,"level":0,"rotated":false}
-  {"piece":2,"x":11,"z":4,"level":0,"rotated":true}
-draw exactly this, and nothing else:
-      0123456789012345
-   4  ...........y....
-   5  ...........y....
-   6  .....yyy...y....
-   7  ......r.........
-Piece 2 is x3z1: laid flat it fills x 5,6,7 on row z=6; turned, the same piece fills z 4,5,6 in column x=11.
-
-"reading" is one sentence, at most 12 words, saying what the finished thing is. No hedging, and never mention LEGO, bricks, studs or coordinates.`;
-
-/* Types are UPPERCASE on purpose. Schema.type is a proto enum, so its JSON form
-   is OBJECT / ARRAY / INTEGER; lowercase is quietly ignored rather than
-   rejected, and an ignored schema means the model invents its own field names —
-   which read back as undefined and filter out to nothing. */
-const FINISH_SCHEMA = {
-  type: 'OBJECT',
-  properties: {
-    reading: { type: 'STRING' },
-    steps: {
-      type: 'ARRAY',
-      items: {
-        type: 'OBJECT',
-        properties: {
-          piece:   { type: 'INTEGER' },
-          x:       { type: 'INTEGER' },
-          z:       { type: 'INTEGER' },
-          level:   { type: 'INTEGER' },
-          rotated: { type: 'BOOLEAN' },
-        },
-        propertyOrdering: ['piece', 'x', 'z', 'level', 'rotated'],
-        required: ['piece', 'x', 'z', 'level', 'rotated'],
-      },
-    },
-  },
-  propertyOrdering: ['reading', 'steps'],
-  required: ['reading', 'steps'],
-};
+Reply with the sentences and nothing else.`;
 
 /* Key goes in a header, never the query string — URLs get logged and shared. */
 async function callGemini(prompt, schema, noThink) {
@@ -1400,11 +1354,10 @@ function say(text, hold = 5000, thinking = false) {
 
 /* ---------- the two asks ---------- */
 const describeBtn = document.getElementById('btnDescribe');
-const addBrickBtn = document.getElementById('btnFinish');
+const addBrickBtn = document.getElementById('btnHint');
 let asking = false;
 async function ask(thinkingText, run) {
   if (asking) return;
-  if (buildQueue.length) return;                // let it finish laying first
   if (!cfg.key || !cfg.model) { openDebug(); say('Add a Gemini API key and pick a model first.'); return; }
   asking = true;
   describeBtn.disabled = addBrickBtn.disabled = true;
@@ -1419,74 +1372,10 @@ tap('btnDescribe', () => ask('looking at your build...', async () => {
   say(text.replace(/^["'\s]+|["'\s]+$/g, ''));
 }));
 
-tap('btnFinish', () => ask('working out how to finish it...', async () => {
-  const raw = await callGemini(finishPrompt(sceneSummary(true)), FINISH_SCHEMA);
-  let plan;
-  try { plan = JSON.parse(raw); } catch { throw new Error('did not reply with the JSON it was asked for'); }
-  // Read tolerantly. The schema asks for one shape, but a wrong guess about the
-  // wrapper or a field name should not silently become "nothing to place".
-  const list = [plan, plan.steps, plan.pieces, plan.placements, plan.plan]
-    .find(v => Array.isArray(v)) || [];
-  const field = (o, ...names) => { for (const n of names) if (o[n] !== undefined) return o[n]; };
-  const steps = list
-    .map(o => ({
-      piece: Number(field(o, 'piece', 'pieceIndex', 'index', 'id')),
-      x:     Math.round(Number(field(o, 'x', 'col', 'column')) || 0),
-      z:     Math.round(Number(field(o, 'z', 'row', 'y')) || 0),
-      level: Number(field(o, 'level', 'height', 'h')) || 0,
-      rot:   field(o, 'rotated', 'rotate', 'turned') ? 1 : 0,
-    }))
-    .filter(o => CATALOG[o.piece])
-    // Ascending level, so supports are laid before whatever rests on them. The
-    // level is only used to order: the real landing is still resolved per piece
-    // against the board as it stands, so a wrong level costs a placement, never
-    // a floating brick.
-    .sort((a, b) => a.level - b.level)
-    .slice(0, FINISH_MAX)
-    .map(o => ({ def: CATALOG[o.piece], x: o.x, z: o.z, rot: o.rot, level: o.level }));
-  if (!steps.length) {
-    // Say which of the two it was, so this is diagnosable rather than a shrug.
-    const got = list.length ? `sent ${list.length} steps I could not read (fields: ${Object.keys(list[0] || {}).join(', ')})`
-                            : `proposed no pieces${plan.reading ? ` - it read the board as "${plan.reading}"` : ''}`;
-    throw new Error(got);
-  }
-  buildQueue.length = 0;
-  buildQueue.push(...steps);
-  buildT = 0;
-  buildDropped = 0;
-  const reading = (plan.reading || '').replace(/^["'\s]+|["'\s]+$/g, '');
-  say(reading || `Finishing it — ${steps.length} pieces.`, steps.length * BUILD_GAP * 1000 + 2500);
+tap('btnHint', () => ask('thinking of something...', async () => {
+  const text = await callGemini(hintPrompt(sceneSummary(false)), null, true);
+  say(text.replace(/^["'\s]+|["'\s]+$/g, ''), 9000);   // longer: it is a sentence to act on
 }));
-
-/* Laid one at a time rather than all at once, so it reads as being built —
-   each piece drops in from above through the ordinary fall, which means it
-   clicks and knocks the board exactly like one placed by hand.              */
-const BUILD_GAP = 0.16;
-const buildQueue = [];
-let buildT = 0, buildDropped = 0;
-function stepBuild(dt) {
-  if (!buildQueue.length) return;
-  buildT -= dt;
-  if (buildT > 0) return;
-  buildT = BUILD_GAP;
-  if (buildQueue.length === 1 && buildDropped)      // last one: own up to the misses
-    setTimeout(() => say(`${buildDropped} of them wouldn't fit where it asked.`), 400);
-  const s = buildQueue.shift();
-  const w = s.rot ? s.def.d : s.def.w, d = s.rot ? s.def.w : s.def.d;
-  const i0 = clamp(s.x, 0, GRID - w), j0 = clamp(s.z, 0, GRID - d);
-  const sol = solveAt(placeX(i0, w), placeX(j0, d), s.def, s.rot);
-  // Landing somewhere other than the level it was planned for means the square
-  // was already taken, so this piece would sit on top of something rather than
-  // where it was meant to go. Dropping it keeps the picture; placing it makes
-  // the pile that comes of treating a collision as a stack.
-  if (!sol.ok || sol.h !== s.level) { buildDropped++; return; }
-  const base = new THREE.Vector3(placeX(sol.i0, sol.w), sol.h * PLATE, placeX(sol.j0, sol.d));
-  const from = base.clone();
-  from.x += (Math.random() * 2 - 1) * 1.6;     // reached in from slightly different
-  from.z += (Math.random() * 2 - 1) * 1.6;     // angles, so it isn't a machine
-  from.y += 5.5 + build.position.y;            // `place` reads `from` as world
-  place(s.def, sol, s.rot, from);
-}
 
 /* ---------- key + model panel ---------- */
 const keyBtn    = document.getElementById('btnKey');
@@ -1602,7 +1491,6 @@ function tick(now) {
     land(p);
   }
   tickHolds(now);
-  stepBuild(dt);
   stepDemolition(dt);
   stepFlight(dt);
   renderer.render(scene, camera);
@@ -1622,4 +1510,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, buildQueue, stepBuild, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
