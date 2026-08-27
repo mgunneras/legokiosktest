@@ -44,15 +44,23 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
+/* Daylight. Background and fog must stay the same colour or the fog ends in a
+   visible band at the horizon. Not pure white — the plate needs something to
+   sit against, and a faintly cool sky keeps the green and the primaries honest. */
+const SKY = '#e8eef7';
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#222a3d');
-scene.fog = new THREE.Fog('#222a3d', 52, 96);
+scene.background = new THREE.Color(SKY);
+scene.fog = new THREE.Fog(SKY, 52, 96);
 
 const camera = new THREE.PerspectiveCamera(38, 1, 0.5, 200);
 const TARGET = new THREE.Vector3(0, 1.2, 0);
 
-scene.add(new THREE.HemisphereLight('#eaf3ff', '#5d687e', 1.25));
-const sun = new THREE.DirectionalLight('#fffaf0', 1.5);
+/* The ground half of the hemisphere light is the big change: it was a dark
+   slate standing in for an unlit room, and it's what made every downward face
+   read as dusk. Bouncing light off a bright floor instead lifts the undersides,
+   so intensity comes *down* a little — the room is doing more of the work. */
+scene.add(new THREE.HemisphereLight('#ffffff', '#ccd8e8', 1.28));
+const sun = new THREE.DirectionalLight('#fffdf6', 1.62);
 sun.position.set(9, 16, 7);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
@@ -60,7 +68,7 @@ sun.shadow.radius = 2;
 const sc = sun.shadow.camera;
 sc.left = -14; sc.right = 14; sc.top = 14; sc.bottom = -14; sc.near = 1; sc.far = 46;
 scene.add(sun);
-const rim = new THREE.DirectionalLight('#9dc0ff', 0.55);
+const rim = new THREE.DirectionalLight('#a9c6ee', 0.34);
 rim.position.set(-8, 6, -9);
 scene.add(rim);
 
@@ -172,14 +180,14 @@ scene.add(build);
 const plateGroup = new THREE.Group();
 build.add(plateGroup);
 {
-  const base = new THREE.Mesh(boxGeo, new THREE.MeshPhongMaterial({ color:'#3f9159', shininess:24 }));
+  const base = new THREE.Mesh(boxGeo, new THREE.MeshPhongMaterial({ color:'#4e9f63', shininess:24 }));
   base.scale.set(GRID, PLATE, GRID);
   base.position.y = -PLATE / 2;
   base.receiveShadow = true;
   base.userData.isBase = true;
   plateGroup.add(base);
 
-  const inst = new THREE.InstancedMesh(studGeo, new THREE.MeshPhongMaterial({ color:'#48a065', shininess:24 }), GRID * GRID);
+  const inst = new THREE.InstancedMesh(studGeo, new THREE.MeshPhongMaterial({ color:'#59ae72', shininess:24 }), GRID * GRID);
   inst.receiveShadow = true;
   inst.raycast = () => {};
   const m = new THREE.Matrix4();
@@ -191,7 +199,7 @@ build.add(plateGroup);
 
   const skirt = new THREE.Mesh(
     new THREE.CylinderGeometry(GRID * 0.92, GRID * 0.92, 0.05, 64),
-    new THREE.MeshBasicMaterial({ color:'#2c3548' })
+    new THREE.MeshBasicMaterial({ color:'#d5deec' })
   );
   skirt.position.y = -PLATE - 0.03;
   plateGroup.add(skirt);

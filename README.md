@@ -74,6 +74,19 @@ Keyboard: `R` rotate, `Z` undo.
     rebound 17% of the dip, over in 100ms. Slacken the damping and the board
     oscillates half a dozen times and the whole thing goes rubbery again.
   - `navigator.vibrate(12)` on hardware that has it.
+- **Daylight theme.** One committed look, not a light/dark pair — a kiosk owns
+  its screen. All UI colour comes from the tokens at the top of `src/style.css`;
+  the scene's half is `SKY` (background *and* fog must match, or the fog ends in
+  a visible band) plus the three lights.
+  - The hemisphere light's *ground* colour does the heavy lifting. It was a dark
+    slate standing in for an unlit room, which is what made every downward face
+    read as dusk; bouncing off a bright floor lifts the undersides instead.
+  - The accent is the red off the 1x1, so the UI is coloured by its own bricks.
+    The old yellow worked on near-black and is illegible on white — an accent
+    that only survives on one ground isn't an accent, it's a coincidence.
+  - Text tokens are picked to clear WCAG AA at the sizes they're actually used:
+    `--dim` is set for 10px labels on `--panel-2`, which is stricter than the
+    same colour on white.
 - `window.__kiosk` exposes state for on-site debugging.
 
 ## Hosted build (one shareable file)
