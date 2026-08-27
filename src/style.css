@@ -89,3 +89,18 @@ html,body{
   filter: drop-shadow(0 10px 18px rgba(21,32,48,.30));
 }
 .tile .swatch{ border-radius:4px; }
+
+/* ---------- start screen ---------- */
+/* Not decoration: a plain tap is the only interaction iOS reliably accepts as
+   permission to make sound. Building never gets one — a drag calls
+   preventDefault and captures the pointer — so the app asks for exactly one. */
+#start{
+  position:fixed; inset:0; z-index:20;
+  display:grid; place-items:center; text-align:center;
+  background:var(--bg); color:var(--ink);
+  transition:opacity .28s ease;
+}
+#start.gone{ opacity:0; pointer-events:none; }
+#start h2{ font-size:15px; letter-spacing:.24em; font-weight:700; color:var(--accent); }
+#start p{ margin-top:12px; font-size:12px; letter-spacing:.09em; color:var(--dim); }
+@media (prefers-reduced-motion: reduce){ #start{ transition:none; } }

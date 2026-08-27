@@ -157,6 +157,13 @@ Keyboard: `R` rotate, `Z` undo.
   long fall reads as a gunshot); coming loose and being thrown are the same
   sweep run in both directions; a botched landing is filtered noise; refusing is
   a squarewave two-step down, deliberately the ugliest thing here.
+- **The start screen is load-bearing.** A plain tap on an element that neither
+  calls `preventDefault()` nor captures the pointer is the one interaction iOS
+  reliably accepts as permission to make sound, and building never produces one:
+  a drag does both. Everything above (context at load, silent-sample kick,
+  per-gesture retry, rebuild-on-refusal) still runs and gets sound going without
+  it on every other browser — but on iPad it is the tap that does it. It cannot
+  be faked: calling the handler from script carries no user activation.
 - **Diagnosing audio on the device.** The bottom-right readout ends with
   `audio <state>/<tries>` — `idle` before any gesture, then the context's own
   state and how many gestures have been spent trying to start it. `running/1`

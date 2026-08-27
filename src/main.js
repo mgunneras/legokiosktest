@@ -1045,6 +1045,27 @@ addEventListener('keydown', e => {
   if (e.key === 'f' || e.key === 'F') toggleFlick();
 });
 
+/* =========================== start screen =========================== */
+/* One plain tap, which is the one interaction iOS accepts as permission to
+   make sound. Building never produces one: a drag calls preventDefault (which
+   suppresses the compat click) and captures the pointer. Deliberately no
+   preventDefault and no capture here — this listener is the same shape as the
+   tool buttons, which are the only thing that ever unlocked audio on iPad. */
+{
+  const startEl = document.getElementById('start');
+  let begun = false;
+  const begin = () => {
+    if (begun) return;
+    begun = true;
+    unlock();
+    startEl.classList.add('gone');
+    setTimeout(() => startEl.remove(), 400);
+  };
+  startEl.addEventListener('click', begin);
+  startEl.addEventListener('touchend', begin);
+  startEl.addEventListener('pointerup', begin);   // last resort on desktop
+}
+
 /* =========================== loop =========================== */
 function resize() {
   const w = stageEl.clientWidth, h = stageEl.clientHeight;
