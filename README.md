@@ -162,14 +162,18 @@ Keyboard: `R` rotate, `Z` undo.
   state and how many gestures have been spent trying to start it. `running/1`
   is healthy. Anything stuck on `suspended` means the browser is refusing, and
   the number says whether `unlock()` is even being reached.
-- **iOS audio needs a gesture, and not just any gesture.** The context is built
-  only from inside a listener, never from a sound call, because one constructed
-  outside a gesture is born suspended and may never start. `resume()` alone is
-  not enough for Safari either — it wants a buffer actually played inside the
-  gesture, so `unlock()` fires one silent sample. It listens on several event
-  types because the palette calls `preventDefault()` on pointerdown, which
-  suppresses the compat click a plain button tap still produces — which is why
-  sound used to arrive only after pressing one of the tools. Every voice is torn
+- **iOS audio: build the context up front, resume it on a gesture.** Measured on
+  iPad Safari via the readout above: a context *created and resumed inside the
+  same gesture* stays suspended, and only starts on a later gesture that resumes
+  an already-existing one. Building it lazily therefore spent the first touch on
+  construction, which is why sound appeared only once you happened to tap a tool
+  button afterwards. It is now constructed at load — it is born suspended either
+  way, so this costs nothing — leaving every gesture free to be a pure resume.
+  `resume()` alone is still not enough for Safari: it wants a buffer actually
+  played inside the gesture, so `unlock()` fires one silent sample too. The same
+  measurement showed a whole drag producing only two unlock attempts, because
+  `preventDefault()` on pointerdown suppresses the compat mousedown/mouseup/click
+  a tap would otherwise add. Every voice is torn
   down on `ended`; Safari is slow to reclaim nodes still wired to the
   destination, and a long build otherwise leaves hundreds hanging off `master`.
   The concurrency cap is a list of scheduled end times rather than a counter,

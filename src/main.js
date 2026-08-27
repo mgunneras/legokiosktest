@@ -135,6 +135,15 @@ function buildCtx() {
   return c;
 }
 
+/* Built up front, deliberately outside any gesture. Measured on iPad Safari:
+   a context created and resumed inside the *same* gesture stays suspended, and
+   only starts on a later gesture that resumes an already-existing one. Spending
+   the first touch on construction is what made sound appear only once you
+   happened to tap a tool button afterwards. Constructing here costs nothing —
+   the context is born suspended either way — and leaves every gesture free to
+   be a pure resume. */
+try { actx = buildCtx(); } catch { actx = false; }
+
 /* Runs on every gesture, and keeps running until the context is genuinely
    playing — never latches on a flag, because a context can be parked again
    later by an interruption and would then never be recovered.               */
