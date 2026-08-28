@@ -157,19 +157,33 @@ html,body{
 .tool[disabled]{ opacity:.45; }
 
 /* ---------- what Gemini says ---------- */
-#bubble{
-  position:fixed; top:0; left:50%; transform:translateX(-50%); z-index:25;
-  max-width:min(620px, 86vw); padding:14px 22px 15px;
-  background:var(--panel); color:var(--ink);
-  border:1px solid var(--line); border-top:none;
-  border-radius:0 0 13px 13px;
-  box-shadow:0 10px 26px rgba(21,32,48,.18);
-  font-size:16px; line-height:1.5; text-align:center;
-  animation:bubbleIn .22s ease;
+/* Two beats, not one paragraph: what it can see, then what to do about it.
+   They stack, and the suggestion is tinted so the difference is felt before
+   either is read. */
+#bubbles{
+  position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:25;
+  width:min(640px, 88vw);
+  display:flex; flex-direction:column; align-items:center; gap:10px;
+  pointer-events:none;
 }
-#bubble.thinking{ color:var(--dim); font-style:italic; }
-@keyframes bubbleIn{ from{ transform:translate(-50%,-100%); opacity:0; } }
-@media (prefers-reduced-motion: reduce){ #bubble{ animation:none; } }
+.bubble{
+  max-width:100%; padding:15px 24px;
+  font-size:18px; line-height:1.45; text-align:center;
+  background:var(--panel); color:var(--ink);
+  border:1px solid var(--line); border-radius:22px;
+  box-shadow:0 12px 30px rgba(21,32,48,.17);
+  animation:bubblePop .3s cubic-bezier(.2,1.25,.4,1);
+  transition:opacity .4s ease, transform .4s ease;
+}
+.bubble.suggests{
+  background:var(--panel-sel); border-color:#eab6b1; color:#8a2119;
+}
+.bubble.thinking{ font-size:15px; color:var(--dim); font-style:italic; }
+.bubble.gone{ opacity:0; transform:translateY(-10px); }
+@keyframes bubblePop{ from{ opacity:0; transform:translateY(-12px) scale(.95); } }
+@media (prefers-reduced-motion: reduce){
+  .bubble{ animation:none; transition:none; }
+}
 
 /* the app kills touch panning globally; the panel needs it back to be typed in */
 #debug, #debug *{ touch-action:auto; -webkit-user-select:text; user-select:text; }

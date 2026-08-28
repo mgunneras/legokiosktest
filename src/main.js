@@ -294,6 +294,42 @@ function pluckSound(up) {
   play(o, [o, g], t, t + 0.17);
 }
 
+/* Gemini arriving. A rising major triad, soft and quick — it should read as
+   someone cheerful turning up, not as a notification. */
+function chime() {
+  const a = audio();
+  if (!a) return;
+  const t = a.currentTime + 0.001;
+  [659.25, 830.61, 1046.5].forEach((f, i) => {      // E5, G#5, C6
+    const at = t + i * 0.085;
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(f, at);
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.20, at + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.42);
+    o.connect(g).connect(master);
+    play(o, [o, g], at, at + 0.46);
+  });
+}
+/* ...and the idea landing: a scatter of tiny high pings, no two alike. */
+function sparkle() {
+  const a = audio();
+  if (!a) return;
+  const t = a.currentTime + 0.001;
+  for (let i = 0; i < 6; i++) {
+    const at = t + i * 0.055 + Math.random() * 0.025;
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(1800 + Math.random() * 2200, at);
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.09, at + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.16);
+    o.connect(g).connect(master);
+    play(o, [o, g], at, at + 0.18);
+  }
+}
+
 /* Can't do that: a short buzzy two-step down. Deliberately the ugliest sound
    here — square wave, low, dissonant against the rest.                      */
 function nope() {
@@ -1435,22 +1471,29 @@ const hintPrompt = scene => `Someone is building a picture out of coloured plast
 
 ${scene}
 
-Give them the next small thing to add.
+Answer in two parts.
 
-Say what you can see so far, then name one small addition that carries it a step further. The next feature, not the next subject: two dots that read as eyes want a nose under them, and then a mouth. A wall wants a door. A trunk wants a leafy top. A roofline wants a chimney.
+"sees" - what you can see, said with delight. One short sentence, 12 words at most, like "Oh, that's a little house on a hill!"
+"suggests" - the next small thing to add, and roughly where. One short sentence, 16 words at most, like "Why not pop a tree just to the left of it?"
+
+For "suggests", name one small addition that carries what is there a step further. The next feature, not the next subject: two dots that read as eyes want a nose under them, and then a mouth. A wall wants a door. A trunk wants a leafy top. A roofline wants a chimney.
 
 Keep the ask small:
 - One to three pieces of work, and no more. This is a blunt tool and every piece is placed by hand, so a whole new animal, building or scene is far too much to ask for.
 - Grow what is already there rather than starting something else somewhere else. Suggest something brand new only when the board is nearly bare.
 - Point roughly where it goes: "just under them", "along the top of it", "one either side".
 
-Rules:
-- Two short sentences at most, 25 words in total.
+Rules for both parts:
 - Warm and playful. Be pleased with what is there. Never sarcastic, and never call it unfinished, empty or wrong.
 - Buildable out of a few coloured blocks: no lettering, no fine detail.
-- Never mention LEGO, bricks, studs, cells, coordinates or the board itself.
+- Never mention LEGO, bricks, studs, cells, coordinates or the board itself.`;
 
-Reply with the sentences and nothing else.`;
+const HINT_SCHEMA = {
+  type: 'OBJECT',
+  properties: { sees: { type: 'STRING' }, suggests: { type: 'STRING' } },
+  propertyOrdering: ['sees', 'suggests'],
+  required: ['sees', 'suggests'],
+};
 
 /* The hints are one running conversation, so it can build on what it already
    said instead of starting cold each time. Two things keep that cheap: only the
@@ -1494,9 +1537,11 @@ ${scene}
 
 ${since}
 
-Give them the next small thing, in the same voice as before. Carry on from what you already said rather than repeating it: if they took your suggestion, be pleased and name the next small feature after it; if they went their own way, go with theirs.
+Answer in the same two parts, in the same voice. Carry on from what you already said rather than repeating it: if they took your suggestion, be pleased and name the next small feature after it; if they went their own way, go with theirs.
 
-Same rules, and the small one especially: one to three pieces of work, growing what is already there rather than starting a new subject beside it. At most two short sentences and 25 words, warm and never sarcastic, buildable out of a few coloured blocks with no lettering or fine detail, and never mention the board itself. Reply with the sentences and nothing else.`;
+"sees" is what you can see now, 12 words at most. "suggests" is the next small thing, 16 words at most.
+
+Same rules, and the small one especially: one to three pieces of work, growing what is already there rather than starting a new subject beside it. Warm and never sarcastic, buildable out of a few coloured blocks with no lettering or fine detail, and never mention the board itself.`;
 
 /* Key goes in a header, never the query string — URLs get logged and shared. */
 async function callGemini(prompt, schema, noThink) {
@@ -1537,15 +1582,39 @@ async function listModels(key) {
 }
 
 /* ---------- what Gemini says ---------- */
-const bubbleEl = document.getElementById('bubble');
-const bubbleTextEl = document.getElementById('bubbleText');
-let bubbleTimer = 0;
-function say(text, hold = 10000, thinking = false) {
-  clearTimeout(bubbleTimer);
-  bubbleTextEl.textContent = text;
-  bubbleEl.classList.toggle('thinking', thinking);
-  bubbleEl.hidden = false;
-  if (hold) bubbleTimer = setTimeout(() => { bubbleEl.hidden = true; }, hold);
+const bubblesEl = document.getElementById('bubbles');
+const SEES_HOLD = 24000, SUGGEST_HOLD = 21000, SECOND_BEAT = 2800;
+let sayToken = 0;                    // anything newer cancels a pending second beat
+
+function bubble(text, kind, hold) {
+  const el = document.createElement('div');
+  el.className = 'bubble' + (kind ? ' ' + kind : '');
+  el.textContent = text;
+  bubblesEl.appendChild(el);
+  if (hold) setTimeout(() => {
+    el.classList.add('gone');
+    setTimeout(() => el.remove(), 500);
+  }, hold);
+  return el;
+}
+function say(text, hold = 12000, thinking = false) {
+  sayToken++;
+  bubblesEl.replaceChildren();
+  bubble(text, thinking ? 'thinking' : '', hold);
+}
+/* What it sees, then a beat, then what to do about it — so the first has been
+   read by the time the second arrives, rather than both landing as one block. */
+function sayPair(sees, suggests) {
+  const mine = ++sayToken;
+  bubblesEl.replaceChildren();
+  chime();
+  if (sees) bubble(sees, 'sees', SEES_HOLD);
+  if (!suggests) return;
+  setTimeout(() => {
+    if (mine !== sayToken) return;   // a newer answer already took the screen
+    sparkle();
+    bubble(suggests, 'suggests', SUGGEST_HOLD);
+  }, sees ? SECOND_BEAT : 0);
 }
 
 /* ---------- the two asks ---------- */
@@ -1565,7 +1634,7 @@ async function ask(thinkingText, run) {
 
 tap('btnDescribe', () => ask('looking at your build...', async () => {
   const text = await callGemini(describePrompt(sceneSummary(false)), null, true);
-  say(text.replace(/^["'\s]+|["'\s]+$/g, ''));
+  sayPair(text.replace(/^["'\s]+|["'\s]+$/g, ''), '');
 }));
 
 tap('btnHint', () => ask('thinking of something...', async () => {
@@ -1573,13 +1642,20 @@ tap('btnHint', () => ask('thinking of something...', async () => {
   const asked = chat.length ? followPrompt(scene, sinceLast()) : hintPrompt(scene);
   // Send the live turn without committing it: a failed call must not leave a
   // dangling user turn behind, which would break the alternation next time.
-  const text = await callGemini([...chat, { role:'user', parts:[{ text: asked }] }], null, true);
-  const said = text.replace(/^["'\s]+|["'\s]+$/g, '');
+  const raw = await callGemini([...chat, { role:'user', parts:[{ text: asked }] }],
+                               HINT_SCHEMA, true);
+  let sees = '', suggests = '';
+  try { const j = JSON.parse(raw); sees = j.sees || ''; suggests = j.suggests || ''; } catch {}
+  if (!sees && !suggests) {              // answered in prose: split at the first stop
+    const m = raw.match(/^([\s\S]*?[.!?])\s+([\s\S]+)$/);
+    sees = (m ? m[1] : raw).trim();
+    suggests = m ? m[2].trim() : '';
+  }
   chat.push({ role:'user',  parts:[{ text: boardLine() }] },   // kept small on purpose
-             { role:'model', parts:[{ text: said }] });
+             { role:'model', parts:[{ text: `${sees} ${suggests}`.trim() }] });
   while (chat.length > CHAT_TURNS) chat.shift();
   lastTally = tallyByColour();
-  say(said, 18000);                      // longest: it is a sentence to act on
+  sayPair(sees, suggests);
 }));
 
 /* ---------- key + model panel ---------- */

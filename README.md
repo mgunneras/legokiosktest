@@ -265,9 +265,18 @@ Two asks, both in the tray footer:
 - **WHAT IS THIS?** sends a semantic snapshot of the board and asks for one
   sentence saying what it depicts. The reply lands in a bubble at the top of the
   screen for five seconds.
-- **WHAT NEXT?** sends the same snapshot and asks for *the next small thing*:
-  what it can see so far, then one addition that carries it a step further. It
-  answers in words, not coordinates, and the person places it.
+- **WHAT NEXT?** sends the same snapshot and asks for *the next small thing*,
+  in two parts: `sees` — what it can see, said with delight — and `suggests`,
+  one addition that carries it a step further. It answers in words, not
+  coordinates, and the person places it.
+
+  They arrive as **two bubbles, a beat apart**: the observation lands with a
+  rising triad, then ~2.8s later the suggestion drops in underneath with a
+  scatter of high pings. The gap is the point — the first has been read by the
+  time the second arrives, instead of both landing as one block. The suggestion
+  is tinted and bordered in the accent so the two read differently before either
+  is read at all. A newer answer cancels a pending second beat, so two quick
+  presses cannot interleave.
 
   The ambition has to be held down explicitly, and the examples in the prompt do
   most of that work. An earlier version offered "a mouse for the cat to chase, a
