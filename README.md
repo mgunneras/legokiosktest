@@ -289,8 +289,10 @@ Two asks, both in the tray footer:
   key button. A newer answer cancels a pending second beat, so two quick presses
   cannot interleave.
 
-  It also returns a **palette**, two to four colour names, and the tray refills
-  with them on the same beat as the sparkle — so "an azure swimming pool" is
+  It also returns a **palette**, three or four colour names drawn from **46 real
+  LEGO colours** (BrickLink names and values — dark azure, medium nougat, sand
+  green, bright light orange), and the tray refills with them on the same beat
+  as the sparkle — so "an azure swimming pool" is
   followed by a tray of azures. Nothing in the catalogue is mutated: a piece
   dragged out carries a *copy* of its definition with the colour of the moment
   baked in, so everything already on the board keeps the colour it was built in
@@ -298,6 +300,24 @@ Two asks, both in the tray footer:
   current colours, so it always knows what it actually has to work with. Colour
   names are checked against the real list, with a fallback that reads them out of
   the sentence if the field is missing, and CLEAR restores the tray.
+
+  Left to itself it names only what the suggestion strictly needs, which after a
+  turn or two is just the colours already on the board — the palette narrows
+  instead of opening up. So variety is *guaranteed* rather than asked for:
+  `widenPalette()` tops the tray to four and forces at least one colour that is
+  not in the build yet, shuffled so it isn't the same newcomer every time. The
+  prompt pushes the same way, and says outright that a tray of colours already
+  in use is a dull tray.
+
+  The 46 colours cost something: the name list is ~500 characters and appears in
+  both the first prompt and the follow-up, taking a hint from ~2.0k to ~3.1k
+  characters. Worth it for a tray that can actually offer a sand green.
+
+**Colour families.** The top-down map is one character per stud, so 46 marks
+would be a code rather than a picture. Each colour carries a family letter and
+the map uses that — `r` for every red, `t` for every tan — while the tray line
+gives Gemini the exact name to ask for. A picture wants families; a shopping
+list wants names.
 
   The ambition has to be held down explicitly, and the examples in the prompt do
   most of that work. An earlier version offered "a mouse for the cat to chase, a

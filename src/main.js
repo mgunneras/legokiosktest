@@ -41,11 +41,60 @@ const DEMO_GAP    = 0.08;         // seconds between bricks when CLEAR goes off
 const FLIGHT_MAX = 8;             // seconds before a stray brick is reclaimed
 
 /* ---------- palette ---------- */
-const C = {
-  red:'#c4281c', blue:'#0d5cb6', yellow:'#f5cd2f', green:'#237841',
-  white:'#f2f3f2', grey:'#a0a5a9', black:'#2b2f33', orange:'#e07923',
-  tan:'#d9bb7c', lime:'#a5ca18', azure:'#57a0d3', purple:'#81007b',
-};
+/* Real LEGO colours with their BrickLink names and values, because a tray that
+   can only offer twelve shades makes for dull suggestions. The third column is
+   a family letter: the top-down map Gemini reads has one character per stud, so
+   near neighbours collapse to the same mark there while the tray still names
+   the exact colour. A picture wants families; a shopping list wants names. */
+const LEGO = [
+  ['white',               '#f2f3f2', 'w'],
+  ['light bluish gray',   '#a0a5a9', 's'],
+  ['dark bluish gray',    '#6c6e68', 's'],
+  ['light gray',          '#9ba19d', 's'],
+  ['dark gray',           '#6d6e5c', 's'],
+  ['black',               '#1b2a34', 'k'],
+  ['red',                 '#c91a09', 'r'],
+  ['dark red',            '#720e0f', 'r'],
+  ['coral',               '#ff698f', 'r'],
+  ['sand red',            '#d67572', 'r'],
+  ['blue',                '#0055bf', 'b'],
+  ['dark blue',           '#0a3463', 'b'],
+  ['medium blue',         '#5a93db', 'b'],
+  ['bright light blue',   '#9fc3e9', 'b'],
+  ['sand blue',           '#6074a1', 'b'],
+  ['dark azure',          '#078bc9', 'a'],
+  ['medium azure',        '#36aebf', 'a'],
+  ['dark turquoise',      '#008f9b', 'a'],
+  ['green',               '#237841', 'g'],
+  ['bright green',        '#4b9f4a', 'g'],
+  ['dark green',          '#184632', 'g'],
+  ['sand green',          '#a0bcac', 'g'],
+  ['lime',                '#bbe90b', 'l'],
+  ['olive green',         '#9b9a5a', 'l'],
+  ['yellowish green',     '#dfeea5', 'l'],
+  ['yellow',              '#f2cd37', 'y'],
+  ['bright light yellow', '#fff03a', 'y'],
+  ['orange',              '#fe8a18', 'o'],
+  ['medium orange',       '#ffa70b', 'o'],
+  ['bright light orange', '#f8bb3d', 'o'],
+  ['dark orange',         '#a95500', 'o'],
+  ['tan',                 '#e4cd9e', 't'],
+  ['dark tan',            '#958a73', 't'],
+  ['nougat',              '#d09168', 't'],
+  ['medium nougat',       '#aa7d55', 't'],
+  ['light nougat',        '#f6d7b3', 't'],
+  ['reddish brown',       '#582a12', 'n'],
+  ['dark brown',          '#352100', 'n'],
+  ['purple',              '#81007b', 'p'],
+  ['dark purple',         '#3f3691', 'p'],
+  ['medium lavender',     '#ac78ba', 'p'],
+  ['lavender',            '#e1d5ed', 'p'],
+  ['magenta',             '#923978', 'i'],
+  ['dark pink',           '#c870a0', 'i'],
+  ['bright pink',         '#e4adc8', 'i'],
+  ['pink',                '#fc97ac', 'i'],
+];
+const C = Object.fromEntries(LEGO.map(([n, h]) => [n, h]));
 /* w = studs along X, d = studs along Z, p = height in plates. `page` is only
    which tray page it appears on — Gemini always sees the whole catalogue.
    Shapes are real elements; the part numbers are there so they can be looked up.
@@ -54,42 +103,42 @@ const C = {
    shape, so placement, stacking and the grid never learn about any of this. */
 const CATALOG = [
   // --- page 0: bricks and plates ---
-  { id:'b1x1', w:1, d:1, p:3, c:C.red,    page:0 },
-  { id:'b1x2', w:2, d:1, p:3, c:C.blue,   page:0 },
-  { id:'b1x3', w:3, d:1, p:3, c:C.yellow, page:0 },
-  { id:'b1x4', w:4, d:1, p:3, c:C.green,  page:0 },
-  { id:'b1x6', w:6, d:1, p:3, c:C.orange, page:0 },
-  { id:'b1x8', w:8, d:1, p:3, c:C.purple, page:0 },
-  { id:'b2x2', w:2, d:2, p:3, c:C.white,  page:0 },
-  { id:'b2x3', w:3, d:2, p:3, c:C.azure,  page:0 },
-  { id:'b2x4', w:4, d:2, p:3, c:C.grey,   page:0 },
-  { id:'b2x6', w:6, d:2, p:3, c:C.lime,   page:0 },
-  { id:'p2x2', w:2, d:2, p:1, c:C.tan,    page:0 },
-  { id:'p2x4', w:4, d:2, p:1, c:C.black,  page:0 },
+  { id:'b1x1', w:1, d:1, p:3, c:C['red'],    page:0 },
+  { id:'b1x2', w:2, d:1, p:3, c:C['blue'],   page:0 },
+  { id:'b1x3', w:3, d:1, p:3, c:C['yellow'], page:0 },
+  { id:'b1x4', w:4, d:1, p:3, c:C['green'],  page:0 },
+  { id:'b1x6', w:6, d:1, p:3, c:C['orange'], page:0 },
+  { id:'b1x8', w:8, d:1, p:3, c:C['purple'], page:0 },
+  { id:'b2x2', w:2, d:2, p:3, c:C['white'],  page:0 },
+  { id:'b2x3', w:3, d:2, p:3, c:C['medium azure'],  page:0 },
+  { id:'b2x4', w:4, d:2, p:3, c:C['light bluish gray'],   page:0 },
+  { id:'b2x6', w:6, d:2, p:3, c:C['lime'],   page:0 },
+  { id:'p2x2', w:2, d:2, p:1, c:C['tan'],    page:0 },
+  { id:'p2x4', w:4, d:2, p:1, c:C['black'],  page:0 },
 
   // --- page 1: slopes. A brick-height fall across one stud is ~50 degrees,
   //     which is the element everyone calls a 45; across two studs it is ~31,
   //     the one called a 33. The names are LEGO's, the angles are geometry's. ---
-  { id:'s3040',  w:2, d:1, p:3, c:C.red,    page:1, shape:'slope',    run:1, part:'3040',  label:'slope 45 2x1' },
-  { id:'s3039',  w:2, d:2, p:3, c:C.blue,   page:1, shape:'slope',    run:1, part:'3039',  label:'slope 45 2x2' },
-  { id:'s3037',  w:4, d:2, p:3, c:C.yellow, page:1, shape:'slope',    run:1, part:'3037',  label:'slope 45 2x4' },
-  { id:'s4286',  w:3, d:1, p:3, c:C.green,  page:1, shape:'slope',    run:2, part:'4286',  label:'slope 33 3x1' },
-  { id:'s3298',  w:3, d:2, p:3, c:C.orange, page:1, shape:'slope',    run:2, part:'3298',  label:'slope 33 3x2' },
-  { id:'s54200', w:1, d:1, p:2, c:C.white,  page:1, shape:'slope',    run:1, part:'54200', label:'cheese slope' },
-  { id:'s85984', w:2, d:1, p:2, c:C.azure,  page:1, shape:'slope',    run:1, part:'85984', label:'slope 30 2x1' },
-  { id:'s3665',  w:2, d:1, p:3, c:C.grey,   page:1, shape:'invslope', run:1, part:'3665',  label:'inverted 2x1' },
-  { id:'s3660',  w:2, d:2, p:3, c:C.tan,    page:1, shape:'invslope', run:1, part:'3660',  label:'inverted 2x2' },
+  { id:'s3040',  w:2, d:1, p:3, c:C['red'],    page:1, shape:'slope',    run:1, part:'3040',  label:'slope 45 2x1' },
+  { id:'s3039',  w:2, d:2, p:3, c:C['blue'],   page:1, shape:'slope',    run:1, part:'3039',  label:'slope 45 2x2' },
+  { id:'s3037',  w:4, d:2, p:3, c:C['yellow'], page:1, shape:'slope',    run:1, part:'3037',  label:'slope 45 2x4' },
+  { id:'s4286',  w:3, d:1, p:3, c:C['green'],  page:1, shape:'slope',    run:2, part:'4286',  label:'slope 33 3x1' },
+  { id:'s3298',  w:3, d:2, p:3, c:C['orange'], page:1, shape:'slope',    run:2, part:'3298',  label:'slope 33 3x2' },
+  { id:'s54200', w:1, d:1, p:2, c:C['white'],  page:1, shape:'slope',    run:1, part:'54200', label:'cheese slope' },
+  { id:'s85984', w:2, d:1, p:2, c:C['medium azure'],  page:1, shape:'slope',    run:1, part:'85984', label:'slope 30 2x1' },
+  { id:'s3665',  w:2, d:1, p:3, c:C['light bluish gray'],   page:1, shape:'invslope', run:1, part:'3665',  label:'inverted 2x1' },
+  { id:'s3660',  w:2, d:2, p:3, c:C['tan'],    page:1, shape:'invslope', run:1, part:'3660',  label:'inverted 2x2' },
 
   // --- page 2: curves and round parts ---
-  { id:'c11477', w:2, d:1, p:3, c:C.red,    page:2, shape:'curve', flat:1, part:'11477', label:'curve 2x1' },
-  { id:'c50950', w:3, d:1, p:3, c:C.blue,   page:2, shape:'curve', flat:1, part:'50950', label:'curve 3x1' },
-  { id:'c61678', w:4, d:1, p:3, c:C.yellow, page:2, shape:'curve', flat:1, part:'61678', label:'curve 4x1' },
-  { id:'c15068', w:2, d:2, p:3, c:C.green,  page:2, shape:'curve', flat:1, part:'15068', label:'curve 2x2' },
-  { id:'c6091',  w:2, d:1, p:4, c:C.purple, page:2, shape:'curve', flat:0, part:'6091',  label:'curved top' },
-  { id:'r3062',  w:1, d:1, p:3, c:C.orange, page:2, shape:'round', part:'3062',  label:'round 1x1' },
-  { id:'r3941',  w:2, d:2, p:3, c:C.lime,   page:2, shape:'round', part:'3941',  label:'round 2x2' },
-  { id:'r98138', w:1, d:1, p:1, c:C.black,  page:2, shape:'round', tile:true, part:'98138', label:'round tile 1x1' },
-  { id:'r4150',  w:2, d:2, p:1, c:C.tan,    page:2, shape:'round', tile:true, part:'4150',  label:'round tile 2x2' },
+  { id:'c11477', w:2, d:1, p:3, c:C['red'],    page:2, shape:'curve', flat:1, part:'11477', label:'curve 2x1' },
+  { id:'c50950', w:3, d:1, p:3, c:C['blue'],   page:2, shape:'curve', flat:1, part:'50950', label:'curve 3x1' },
+  { id:'c61678', w:4, d:1, p:3, c:C['yellow'], page:2, shape:'curve', flat:1, part:'61678', label:'curve 4x1' },
+  { id:'c15068', w:2, d:2, p:3, c:C['green'],  page:2, shape:'curve', flat:1, part:'15068', label:'curve 2x2' },
+  { id:'c6091',  w:2, d:1, p:4, c:C['purple'], page:2, shape:'curve', flat:0, part:'6091',  label:'curved top' },
+  { id:'r3062',  w:1, d:1, p:3, c:C['orange'], page:2, shape:'round', part:'3062',  label:'round 1x1' },
+  { id:'r3941',  w:2, d:2, p:3, c:C['lime'],   page:2, shape:'round', part:'3941',  label:'round 2x2' },
+  { id:'r98138', w:1, d:1, p:1, c:C['black'],  page:2, shape:'round', tile:true, part:'98138', label:'round tile 1x1' },
+  { id:'r4150',  w:2, d:2, p:1, c:C['tan'],    page:2, shape:'round', tile:true, part:'4150',  label:'round tile 2x2' },
 ];
 /* The tray can be re-tinted to whatever Gemini just suggested. Nothing in the
    catalogue is mutated: a piece dragged out carries a *copy* of its definition
@@ -1400,13 +1449,14 @@ const cfg = { key: '', model: '' };
 try { Object.assign(cfg, JSON.parse(localStorage.getItem(CFG_KEY) || '{}')); } catch {}
 const saveCfg = () => { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch {} };
 
-const COLOUR_NAME = {};
-for (const [n, hex] of Object.entries(C)) COLOUR_NAME[hex] = n;
+const COLOUR_NAME = Object.fromEntries(LEGO.map(([n, h]) => [h, n]));
 const pieceName = d => `${COLOUR_NAME[d.c]} ${d.d}x${d.w} ${d.p === 1 ? 'plate' : 'brick'}`;
 /* One character per cell, no separators: a third of the tokens of a spaced
-   two-letter grid, and it reads more like the picture it is. */
-const CODE = { red:'r', blue:'b', yellow:'y', green:'g', white:'w', grey:'s',
-               black:'k', orange:'o', tan:'t', lime:'l', azure:'a', purple:'p' };
+   two-letter grid, and it reads more like the picture it is. Shades collapse
+   to their family here — forty marks would be a code, not a picture. */
+const CODE = Object.fromEntries(LEGO.map(([n, , f]) => [n, f]));
+const FAMILIES = 'r red  o orange  y yellow  l lime  g green  a azure  b blue\n' +
+                 'p purple  i pink  n brown  t tan  w white  s grey  k black';
 
 /* The single most useful thing to hand over: what the board actually looks like
    from above. A list of pieces describes the parts; this describes the picture,
@@ -1452,8 +1502,7 @@ function sceneSummary(withTray) {
   out.push('');
   const { paint, relief, tallest } = topDown();
   out.push('THE PICTURE, straight down. One character per stud, "." is bare board.');
-  out.push('r red  b blue  y yellow  g green  w white  s grey(slate)');
-  out.push('k black  o orange  t tan  l lime  a azure  p purple');
+  out.push(FAMILIES);
   out.push(paint);
   // Only worth sending once something actually stands above one brick; on a flat
   // drawing it is 16 identical rows saying nothing.
@@ -1506,7 +1555,9 @@ Answer in two parts.
 
 "sees" - what you can see, said with delight. One short sentence, 12 words at most, like "Oh, that's a little house on a hill!"
 "suggests" - the next small thing to add, and roughly where. One short sentence, 16 words at most, like "Why not pop a tree just to the left of it?"
-"palette" - two to four colours your suggestion needs, most important first, chosen from exactly these names: red, blue, yellow, green, white, grey, black, orange, tan, lime, azure, purple. A green tree is green and tan; an azure swimming pool is azure and white. The tray is refilled with these, so name the colours you actually want them holding.
+"palette" - three or four colours to fill the tray with, most important first, chosen from exactly these names:
+${COLOUR_LIST}
+Start with what your suggestion needs - a green tree wants green and tan - and then be bold: include at least one colour that is not on the board yet, something worth reaching for even if the suggestion does not strictly need it. A tray of only the colours already in use is a dull tray, and the person can only build with what is in it.
 
 For "suggests", name one small addition that carries what is there a step further. The next feature, not the next subject: two dots that read as eyes want a nose under them, and then a mouth. A wall wants a door. A trunk wants a leafy top. A roofline wants a chimney.
 
@@ -1531,6 +1582,26 @@ const HINT_SCHEMA = {
   required: ['sees', 'suggests', 'palette'],
 };
 const COLOUR_NAMES = Object.keys(C);
+const COLOUR_LIST = COLOUR_NAMES.join(', ');
+/* Left to itself it names only what the suggestion strictly needs, which after
+   a turn or two is just the colours already on the board. So the ask is widened
+   here as well as in the prompt: guarantee at least one colour that is not in
+   the build yet, and top the tray up to four, so there is always something new
+   to reach for rather than a slowly narrowing palette. */
+function widenPalette(hexes) {
+  if (!hexes) return null;
+  const out = [...new Set(hexes)];
+  const used = new Set(placed.map(p => p.def.c));
+  const fresh = COLOUR_NAMES.map(n => C[n]).filter(h => !out.includes(h) && !used.has(h));
+  for (let i = fresh.length - 1; i > 0; i--) {          // so it is not the same
+    const j = Math.floor(Math.random() * (i + 1));      // newcomer every time
+    [fresh[i], fresh[j]] = [fresh[j], fresh[i]];
+  }
+  if (!out.some(h => !used.has(h)) && fresh.length) out.push(fresh.pop());
+  while (out.length < 4 && fresh.length) out.push(fresh.pop());
+  return out.slice(0, 5);
+}
+
 /* Take the colours it asked for, but only ones that exist. If it named them in
    the sentence instead of the field, read them out of there. */
 function toPalette(list, text) {
@@ -1586,7 +1657,9 @@ ${since}
 
 Answer in the same two parts, in the same voice. Carry on from what you already said rather than repeating it: if they took your suggestion, be pleased and name the next small feature after it; if they went their own way, go with theirs.
 
-"sees" is what you can see now, 12 words at most. "suggests" is the next small thing, 16 words at most. "palette" is two to four colour names it needs, from that same list.
+"sees" is what you can see now, 12 words at most. "suggests" is the next small thing, 16 words at most. "palette" is three or four colour names, again from exactly this list:
+${COLOUR_LIST}
+What the suggestion needs, plus at least one colour that is not on the board yet. Keep introducing new ones - repeating the same few every turn makes the tray dull, and there are plenty to choose from.
 
 Same rules, and the small one especially: one to three pieces of work, growing what is already there rather than starting a new subject beside it. Warm and never sarcastic, buildable out of a few coloured blocks with no lettering or fine detail, and never mention the board itself.`;
 
@@ -1705,7 +1778,7 @@ tap('btnHint', () => ask('thinking of something...', async () => {
              { role:'model', parts:[{ text: `${sees} ${suggests}`.trim() }] });
   while (chat.length > CHAT_TURNS) chat.shift();
   lastTally = tallyByColour();
-  sayPair(sees, suggests, toPalette(plan.palette, suggests));
+  sayPair(sees, suggests, widenPalette(toPalette(plan.palette, suggests)));
 }));
 
 /* ---------- key + model panel ---------- */
@@ -1841,4 +1914,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayPair, chat, sinceLast, toPalette, colourOf, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayPair, chat, sinceLast, toPalette, widenPalette, colourOf, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
