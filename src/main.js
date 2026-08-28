@@ -378,6 +378,19 @@ function studAt(def, i) {
   return true;                                  // plain, inverted and round: all of it
 }
 
+/* The lump as one object: each part where it sits relative to the lump's centre,
+   so turning the group turns the lot. */
+function buildAssembly(asm, ghost) {
+  const g = new THREE.Group();
+  for (const p of asm.parts) {
+    const b = buildBrick(p.def, ghost);
+    b.rotation.y = p.rot * (Math.PI / 2);
+    b.position.set(p.di + p.fw / 2 - asm.W / 2, p.dh * PLATE, p.dj + p.fd / 2 - asm.D / 2);
+    g.add(b);
+  }
+  return g;
+}
+
 /* builds a brick as a Group: body + studs. Origin = footprint centre, y = base. */
 function buildBrick(def, ghost = false, tintHex = null) {
   const g = new THREE.Group();
@@ -393,6 +406,7 @@ function buildBrick(def, ghost = false, tintHex = null) {
     body.position.y = h / 2;
   }
   body.castShadow = !ghost; body.receiveShadow = !ghost;
+  body.userData.tint = tintHex || def.c;      // a ghost lump must know its own colours
   g.add(body);
 
   for (let i = 0; i < def.w; i++) {
@@ -401,6 +415,7 @@ function buildBrick(def, ghost = false, tintHex = null) {
       const s = new THREE.Mesh(studGeo, mat);
       s.position.set(i - (def.w - 1) / 2, h + STUD_H / 2, j - (def.d - 1) / 2);
       s.castShadow = !ghost;
+      s.userData.tint = tintHex || def.c;
       s.raycast = () => {};                 // studs never block picking
       g.add(s);
     }
@@ -499,9 +514,76 @@ function isFree(rec) {
     for (let j = s.j0; j < s.j0 + s.d; j++) if (H(i, j) !== top) return false;
   return true;
 }
+/* Everything resting on this piece, and everything resting on those. A real
+   brick comes up as a lump and takes its passengers with it; so should this. */
+const foots = (p, q) => p.i0 < q.i0 + q.w && q.i0 < p.i0 + p.w &&
+                        p.j0 < q.j0 + q.d && q.j0 < p.j0 + p.d;
+function assemblyOf(root) {
+  const members = [root], seen = new Set([root]);
+  for (let n = 0; n < members.length; n++) {
+    const a = members[n], top = a.sol.h + a.def.p;
+    for (const b of placed)
+      if (!seen.has(b) && b.sol.h === top && foots(a.sol, b.sol)) { seen.add(b); members.push(b); }
+  }
+  return members;
+}
+/* Re-expressed relative to the lump's own low corner, so it can be carried
+   around and turned without caring where it came from. */
+function toLocal(members) {
+  let i0 = GRID, j0 = GRID, h0 = Infinity;
+  for (const m of members) {
+    i0 = Math.min(i0, m.sol.i0); j0 = Math.min(j0, m.sol.j0); h0 = Math.min(h0, m.sol.h);
+  }
+  let W = 0, D = 0, H = 0;
+  const parts = members.map(m => {
+    const q = { def:m.def, rot:m.rot, di:m.sol.i0 - i0, dj:m.sol.j0 - j0, dh:m.sol.h - h0,
+                fw:m.sol.w, fd:m.sol.d };
+    W = Math.max(W, q.di + q.fw); D = Math.max(D, q.dj + q.fd); H = Math.max(H, q.dh + m.def.p);
+    return q;
+  });
+  return { parts, W, D, H };
+}
+/* A quarter turn of the whole lump about its own centre. Each part turns with
+   it and lands at a different corner — the same mapping a single piece uses. */
+function turnAsm(asm, R) {
+  if (!R) return asm;
+  return { W: asm.D, D: asm.W, H: asm.H,
+    parts: asm.parts.map(p => ({ def:p.def, rot:p.rot ^ 1, dh:p.dh,
+      di:p.dj, dj:asm.W - p.di - p.fw, fw:p.fd, fd:p.fw })) };
+}
+
+/* Where does a whole lump come to rest, and may it? Three things have to hold,
+   and the second is the one a single brick never had to worry about:
+   it drops until something stops it; no part may end up inside anything already
+   standing — including a part high in the lump meeting a tower beside it; and
+   something on its underside must land on studs.                            */
+function solveAsm(px, pz, asm, R) {
+  const t = turnAsm(asm, R);
+  const I0 = clamp(Math.round(px + GRID / 2 - t.W / 2), 0, GRID - t.W);
+  const J0 = clamp(Math.round(pz + GRID / 2 - t.D / 2), 0, GRID - t.D);
+
+  let h = 0;                                   // lower it until a part touches down
+  for (const p of t.parts)
+    for (let i = 0; i < p.fw; i++)
+      for (let j = 0; j < p.fd; j++)
+        h = Math.max(h, H(I0 + p.di + i, J0 + p.dj + j) - p.dh);
+
+  let ok = true, grip = false;
+  for (const p of t.parts) {
+    if (h + p.dh + p.def.p > MAX_STACK) { ok = false; break; }
+    for (let i = 0; i < p.fw && ok; i++)
+      for (let j = 0; j < p.fd; j++) {
+        const wi = I0 + p.di + i, wj = J0 + p.dj + j, floor = H(wi, wj);
+        if (h + p.dh < floor) { ok = false; break; }        // this part is inside something
+        if (h + p.dh === floor && canMate(wi, wj)) grip = true;
+      }
+  }
+  return { I0, J0, W:t.W, D:t.D, h, parts:t.parts, ok: ok && grip };
+}
+
 /* Out of whichever world it was in, and out of every list that referenced it. */
-function detach(rec) {
-  if (rec.kind === 'placed') { drop1(placed, rec); rebuildHeights(); }
+function detach(rec, defer) {
+  if (rec.kind === 'placed') { drop1(placed, rec); if (!defer) rebuildHeights(); }
   else                       { drop1(loose, rec); }
   drop1(hitList, rec.g.userData.pickBody);
   drop1(pickList, rec.g.userData.pickBody);
@@ -654,6 +736,12 @@ function solveRay(def, rot) {
                  hit.point.z - hit.face.normal.z * 0.02, def, rot);
 }
 const solve = (x, y, def, rot) => castFrom(x, y) ? solveRay(def, rot) : null;
+function solveRayAsm(asm, R) {
+  const hit = ray.intersectObjects(hitList, false)[0];
+  if (!hit) return null;
+  return solveAsm(hit.point.x - hit.face.normal.x * 0.02,
+                  hit.point.z - hit.face.normal.z * 0.02, asm, R);
+}
 const overBoard = p => Math.abs(p.x) <= GRID / 2 && Math.abs(p.z) <= GRID / 2;
 
 const placeX = (i0, w) => i0 - GRID / 2 + w / 2;
@@ -666,7 +754,7 @@ const holds = new Map();        // pointerId -> { rec, line, t0, x0, y0, x, y, b
 let lastTap = { rec: null, t: 0 };
 
 function startHold(e, rec) {
-  const blocked = !isFree(rec);
+  const blocked = false;        // anything can be lifted now, lump and all
   const span = rec.g.userData.span;
   // Depth-tested on purpose: drawing through the brick reads as an x-ray cage
   // rather than its edges lighting up. Nudged out just far enough to clear the
@@ -693,9 +781,7 @@ function tickHolds(now) {
   for (const [pid, h] of holds) {
     const t = Math.min((now - h.t0) / HOLD_MS, 1);
     h.line.material.opacity = 0.35 + t * 0.65;    // the edges brighten as it loosens
-    if (t < 1) continue;
-    if (!h.blocked) liftBrick(pid, h);
-    else if (!h.buzzed) { h.buzzed = true; nope(); }   // held long enough to mean it
+    if (t >= 1) liftBrick(pid, h);
   }
 }
 /* Straight from the build into the hand: same drag session a palette brick gets,
@@ -705,22 +791,33 @@ function liftBrick(pid, h) {
   cancelHold(pid);
   nav.delete(pid);                                // this is a drag now, not an orbit
   pinch = null;
-  const seed = rec.kind === 'placed' ? rec.rot : undefined;
-  const def = rec.def;
-  detach(rec);
   pluckSound(true);
-  beginDrag({ pointerId: pid, clientX: h.x, clientY: h.y }, def, null, seed);
+  if (rec.kind === 'loose') {                     // a desk piece is only ever itself
+    const def = rec.def;
+    detach(rec);
+    beginDrag({ pointerId: pid, clientX: h.x, clientY: h.y }, def, null, undefined);
+    return;
+  }
+  // Take the whole lump. A single brick is just a lump of one, so this is the
+  // only lifting path off the board and there is no second case to keep in step.
+  const members = assemblyOf(rec);
+  const asm = toLocal(members);
+  for (const m of members) detach(m, true);
+  rebuildHeights();
+  // The lump comes up in the orientation it was sitting in, so it starts unturned.
+  beginDrag({ pointerId: pid, clientX: h.x, clientY: h.y }, rec.def, null, 0, asm);
 }
 /* A press that neither travelled nor lasted is a tap; two of them chuck it. */
 function tapHold(e) {
   const h = holds.get(e.pointerId);
   if (!h) return;
-  const rec = h.rec, blocked = h.blocked;
+  const rec = h.rec;
   cancelHold(e.pointerId);
   const now = performance.now();
   if (lastTap.rec === rec && now - lastTap.t < DOUBLE_MS) {
     lastTap = { rec: null, t: 0 };
-    blocked ? nope() : chuck(rec);
+    // Throwing one away is still single-piece: nothing may be sitting on it.
+    isFree(rec) ? chuck(rec) : nope();
   } else {
     lastTap = { rec, t: now };
   }
@@ -752,7 +849,7 @@ function gridTurns(s) {
 }
 const gridRot = s => gridTurns(s) & 1;
 
-function beginDrag(e, def, srcEl, seedRot) {
+function beginDrag(e, def, srcEl, seedRot, asm) {
   // A pointer id gets reused — a mouse is always id 1 — so a session that was
   // somehow left open would be overwritten here and orphan its tile and brick
   // in the scene with nothing left holding a reference to them.
@@ -771,7 +868,7 @@ function beginDrag(e, def, srcEl, seedRot) {
   // camera without disturbing that.
   const s = { def, tile, src:srcEl, x:e.clientX, y:e.clientY, az0:view.az,
               rot0: seedRot === undefined ? screenParity(def) : ((seedRot - manualRot) & 1),
-              held:null, ghost:null, rot:-1, sol:null, yaw:0, yawTo:0,
+              asm, held:null, ghost:null, rot:-1, sol:null, yaw:0, yawTo:0,
               vel:new THREE.Vector3(), lastPos:new THREE.Vector3(), lastT:0 };
   drags.set(e.pointerId, s);
   refreshDrag(s);
@@ -793,16 +890,20 @@ function refreshDrag(s) {
 
   const turns = gridTurns(s), rot = turns & 1;
   if (!s.held) {                                    // built once, then only turned
-    s.held = buildBrick(s.def);                     // solid — this is the one in your hand
+    s.held = s.asm ? buildAssembly(s.asm) : buildBrick(s.def);
     scene.add(s.held);
     s.yaw = turns * (Math.PI / 2);
+    if (s.asm) { s.ghost = buildAssembly(s.asm, true); build.add(s.ghost); }
   }
   // The hand twists; it doesn't teleport. The ghost still snaps, because it is
   // answering "where does this land", not "what is my hand doing".
   s.yawTo = turns * (Math.PI / 2);
   s.yaw += (s.yawTo - s.yaw) * 0.32;
   s.held.rotation.y = s.yaw;
-  if (rot !== s.rot) {                              // snapped to the other grid axis
+  if (s.asm) {
+    s.ghost.rotation.y = rot * (Math.PI / 2);       // a lump only ever turns
+    s.rot = rot;
+  } else if (rot !== s.rot) {                       // snapped to the other grid axis
     if (s.ghost) build.remove(s.ghost);
     s.ghost = buildBrick(s.def, true);
     s.ghost.rotation.y = rot * (Math.PI / 2);
@@ -810,12 +911,12 @@ function refreshDrag(s) {
     s.rot = rot;
   }
 
-  const sol = over ? solveRay(s.def, rot) : null;
+  const sol = over ? (s.asm ? solveRayAsm(s.asm, rot) : solveRay(s.def, rot)) : null;
   s.sol = sol;
 
   s.held.visible = over;
   if (over) {                                       // hang the brick under the finger
-    const hh = s.def.p * PLATE;
+    const hh = (s.asm ? s.asm.H : s.def.p) * PLATE;
     const y  = (sol ? sol.h * PLATE : 0) + HOVER;
     hoverPlane.constant = -y;
     if (ray.ray.intersectPlane(hoverPlane, tmpV)) {
@@ -842,6 +943,13 @@ function refreshDrag(s) {
 
   s.ghost.visible = !!sol;
   if (!sol) return;
+  if (s.asm) {   // one verdict for the whole lump: it goes down entire or not at all
+    s.ghost.position.set(placeX(sol.I0, sol.W), sol.h * PLATE, placeX(sol.J0, sol.D));
+    s.ghost.traverse(o => {
+      if (o.isMesh) o.material = brickMat(sol.ok ? o.userData.tint : '#ff3b3b', true);
+    });
+    return;
+  }
   s.ghost.position.set(placeX(sol.i0, sol.w), sol.h * PLATE, placeX(sol.j0, sol.d));
   const tint = sol.ok ? null : '#ff3b3b';
   s.ghost.traverse(o => { if (o.isMesh) o.material = brickMat(tint || s.def.c, true); });
@@ -859,10 +967,14 @@ function endDrag(e) {                       // released: throw it, or drop it if
   const s = drags.get(e.pointerId);
   if (!s) return;
   const from  = s.held.visible ? s.held.position.clone() : null;   // closeDrag frees it
-  const thrown = flickOn && from && s.vel.length() >= FLICK_MIN;
+  const thrown = flickOn && from && !s.asm && s.vel.length() >= FLICK_MIN;
   const vel = s.vel.clone(), { def, sol, rot } = s;
   closeDrag(s, e.pointerId);
-  if (thrown)              launch(def, rot, from, vel);
+  if (s.asm) {                                 // a lump is never thrown, only set down
+    if (sol && sol.ok)  placeAsm(s.asm, sol);
+    else if (from)      shedAsm(s.asm, rot, from);
+  }
+  else if (thrown)         launch(def, rot, from, vel);
   else if (sol && sol.ok)  place(def, sol, rot, from);
   else if (from)           discard(def, rot, from, vel);   // off the build: onto the desk
 }
@@ -916,6 +1028,35 @@ function land(p) {
   popSound(p.sol.h + p.def.p);
   navigator.vibrate?.(12);
 }
+/* Down it goes, all of it, each part committed at its own place in the lump.
+   One click and one knock for the lot — it arrived as one thing. */
+function placeAsm(asm, sol) {
+  for (const p of sol.parts) {
+    const sub = { i0: sol.I0 + p.di, j0: sol.J0 + p.dj, w: p.fw, d: p.fd,
+                  h: sol.h + p.dh, ok: true };
+    const rec = commit(buildBrick(p.def), p.def, sub, p.rot);
+    const off = new THREE.Vector3(0, 1.2, 0);
+    rec.anim = { off, t: 0, v: 0.015 };
+    rec.g.position.copy(rec.base).add(off);
+  }
+  const studs = sol.parts.reduce((n, p) => n + p.fw * p.fd, 0);
+  boardY.v -= Math.min(0.066 + studs * 0.014, 0.24);
+  popSound(sol.h + asm.H);
+  navigator.vibrate?.(14);
+}
+/* Released somewhere it cannot go: it comes apart onto the desk rather than
+   vanishing, the same as a single piece dropped off the build. */
+function shedAsm(asm, R, from) {
+  const t = turnAsm(asm, R);
+  for (const p of t.parts) {
+    const at = from.clone();
+    at.x += (p.di - t.W / 2 + 0.5) * 0.9;
+    at.z += (p.dj - t.D / 2 + 0.5) * 0.9;
+    at.y += p.dh * PLATE;
+    discard(p.def, p.rot, at, new THREE.Vector3());
+  }
+}
+
 /* ---------- the flick ---------- */
 /* Whether a throw sticks is decided here, at launch, not on arrival — a dud is
    committed to before it ever touches down, so it tumbles the whole way in. */
@@ -1574,4 +1715,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, chat, sinceLast, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, chat, sinceLast, assemblyOf, toLocal, turnAsm, solveAsm, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };

@@ -29,7 +29,7 @@ Kiosk shell (Electron — fullscreen, frameless, locked):
 | Plate | drop onto a placed brick | it stacks; courses can be staggered or overhang |
 | Plate | spin it while holding a brick | the held brick keeps its orientation, so it lands on whichever grid axis is now nearest — this is how you turn a brick 90° |
 | Plate | release while still moving | the brick is thrown — it arcs in and clicks home |
-| Plate | press and hold a brick (300ms) | edges light, then it lifts back into your hand |
+| Plate | press and hold a brick (180ms) | it and everything on it lift into your hand as one lump |
 | Plate | double-tap a brick | it gets chucked off the table |
 | Plate | release off the build | it lands on the desk and stays there, pickable later |
 | MORE BRICKS | tap | next tray page — bricks, slopes, curves |
@@ -167,11 +167,26 @@ Keyboard: `R` rotate, `Z` undo.
   for a nudge, ~10 for a hard one. Whether it sticks is rolled at launch, not on
   arrival, so a dud tumbles the whole way in. Overshooting the board fails
   regardless of the roll, which gives the throw some actual skill.
-- **Picking a brick back up** is a hold, not a tap, so it can't fight the orbit:
-  the hold is abandoned the moment the finger travels more than `HOLD_SLOP`.
-  Blocked if anything rests on it — every column under the footprint must top
-  out at that brick — which is also what makes `rebuildHeights()` safe to replay
-  after a removal, since nothing above could have depended on it.
+- **Picking up takes the whole sub-assembly.** A real brick comes up as a lump
+  and brings its passengers, so `assemblyOf()` walks the transitive closure of
+  "rests on" and lifts the lot. A single brick is just a lump of one, so there is
+  only one lifting path and no second case to keep in step. It is a hold rather
+  than a tap so it can't fight the orbit: the hold is abandoned the moment the
+  finger travels more than `HOLD_SLOP`.
+- **Setting a lump down is the interesting bit.** It is not enough that the
+  bottom piece mates — a piece high in the lump can run into something standing
+  beside where it is going. So `solveAsm()` lowers the whole thing until *any*
+  part touches down: `h = max over every part of (H(column) - dh)`. Checking the
+  bottom alone would answer 0 where the true answer is 3, and drive an upper
+  brick straight through a neighbouring wall. Because the rest height is the
+  maximum over all parts, nothing can end up inside anything — the intersection
+  check that follows is a guard, not a filter. Then at least one part must land
+  on studs, so a lump cannot hover with nothing gripping.
+- Turning a lump is one quarter turn of the group about its own centre, with each
+  part's corner remapped the same way a single piece's cells are.
+- Released where it cannot go, a lump comes apart onto the desk rather than
+  vanishing. Throwing away with a double-tap is still single-piece: nothing may
+  be resting on it.
 - **Sounds are separated by shape, not just pitch,** so they're told apart with
   no attention paid: seating is a very short high sine tick (a low body with a
   long fall reads as a gunshot); coming loose and being thrown are the same
