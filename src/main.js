@@ -1528,25 +1528,6 @@ function sceneSummary(withTray) {
   return out.join('\n');
 }
 
-const describePrompt = scene => `Someone has been drawing on a 16x16 board with coloured plastic pieces. You are looking straight down at it.
-
-${scene}
-
-Tell them what the picture shows.
-
-Read the colour map the way you would read pixel art or a painted sign, not a sculpture: shapes made of adjacent same-coloured cells, where they sit on the board, and what they add up to. A blue band across the bottom rows is water. A green mass is grass or a canopy. A brown or tan column under it is a trunk. Read the relief map as a second, weaker signal — raised cells are the parts standing proud of the picture, not a separate building.
-
-Rules:
-- One sentence, 14 words maximum.
-- Commit to a single reading. No hedging, no listing possibilities, no "either ... or".
-- Never mention LEGO, bricks, studs, plates, cells, coordinates or the board.
-- If the board is nearly bare, say so with some charm instead of inventing a scene.
-
-Reply with the sentence and nothing else.`;
-
-/* What it is, and what to do about it. The suggestion is the point: it has to
-   be concrete enough to act on, kind about what is already there, and buildable
-   out of coloured blocks — no faces, no lettering, no filigree. */
 const hintPrompt = scene => `Someone is building a picture out of coloured plastic pieces on a small board, seen from straight above. Here is what they have so far.
 
 ${scene}
@@ -1741,24 +1722,18 @@ function sayPair(sees, suggests, palette) {
 }
 
 /* ---------- the two asks ---------- */
-const describeBtn = document.getElementById('btnDescribe');
-const addBrickBtn = document.getElementById('btnHint');
+const hintBtn = document.getElementById('btnHint');
 let asking = false;
 async function ask(thinkingText, run) {
   if (asking) return;
   if (!cfg.key || !cfg.model) { openDebug(); say('Add a Gemini API key and pick a model first.'); return; }
   asking = true;
-  describeBtn.disabled = addBrickBtn.disabled = true;
+  hintBtn.disabled = true;
   say(thinkingText, 0, true);
   try { await run(); }
   catch (e) { say(`Gemini: ${e.message}`, 7000); }
-  finally { asking = false; describeBtn.disabled = addBrickBtn.disabled = false; }
+  finally { asking = false; hintBtn.disabled = false; }
 }
-
-tap('btnDescribe', () => ask('looking at your build...', async () => {
-  const text = await callGemini(describePrompt(sceneSummary(false)), null, true);
-  sayPair(text.replace(/^["'\s]+|["'\s]+$/g, ''), '');
-}));
 
 tap('btnHint', () => ask('thinking of something...', async () => {
   const scene = sceneSummary(false);

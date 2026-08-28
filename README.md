@@ -34,7 +34,7 @@ Kiosk shell (Electron — fullscreen, frameless, locked):
 | Plate | release off the build | it lands on the desk and stays there, pickable later |
 | MORE BRICKS | tap | next tray page — bricks, slopes, curves |
 | CLEAR | tap | demolition — the build leaves one brick at a time |
-| WHAT NEXT? | tap | Gemini suggests one thing to add |
+| WHAT NEXT? | tap | Gemini says what it sees, then suggests one thing to add |
 
 Keyboard: `R` rotate, `Z` undo.
 
@@ -269,11 +269,8 @@ saved. It opens a panel for the key and a model picker. The model list is
 *fetched* from the API rather than hard-coded, so it is whatever that key can
 actually use, filtered to models supporting `generateContent`.
 
-Two asks, both in the tray footer:
+One ask, in the tray footer:
 
-- **WHAT IS THIS?** sends a semantic snapshot of the board and asks for one
-  sentence saying what it depicts. The reply lands in a bubble at the top of the
-  screen for five seconds.
 - **WHAT NEXT?** sends the same snapshot and asks for *the next small thing*,
   in two parts: `sees` — what it can see, said with delight — and `suggests`,
   one addition that carries it a step further. It answers in words, not
@@ -352,8 +349,8 @@ list wants names.
   A failed call commits nothing, so a rate limit or a dropped connection cannot
   leave a dangling user turn and break the alternation on the next ask.
 
-Neither ask can touch the board: both only ever produce a sentence, so there is
-no path at all from a model reply into the grid.
+It cannot touch the board: the reply only ever becomes two sentences and a set
+of tray colours, so there is no path from a model reply into the grid.
 
 `sceneSummary()` is the interesting half, and it is built around one idea: a
 16x16 board of coloured pieces is far closer to **pixel art than architecture**,
