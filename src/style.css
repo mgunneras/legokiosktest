@@ -175,8 +175,12 @@ html,body{
   animation:bubblePop .3s cubic-bezier(.2,1.25,.4,1);
   transition:opacity .4s ease, transform .4s ease;
 }
+/* Green, not red. Red is already "invalid" here — the refused ghost, the
+   blocked highlight — so a red suggestion reads as an error rather than an
+   invitation. Green is this interface's existing "all good", from the key
+   button, so the meaning is already established. */
 .bubble.suggests{
-  background:var(--panel-sel); border-color:#eab6b1; color:#8a2119;
+  background:#eaf7ef; border-color:#9ed6b4; color:#17663a;
 }
 .bubble.thinking{ font-size:15px; color:var(--dim); font-style:italic; }
 .bubble.gone{ opacity:0; transform:translateY(-10px); }
@@ -193,3 +197,13 @@ html,body{
 .swatch.invslope{ clip-path: polygon(0 0, 100% 0, 100% 100%, 34% 100%, 0 66%); }
 .swatch.curve{ border-top-left-radius:70%; }
 .swatch.round{ border-radius:50%; }
+
+/* the tray turning over when Gemini asks for different colours */
+@keyframes swatchFlip{
+  0%   { transform:scale(1)   rotate(0); }
+  40%  { transform:scale(.82) rotate(-7deg); }
+  100% { transform:scale(1)   rotate(0); }
+}
+.brick.recolour{ animation:swatchFlip .42s ease both; }
+.swatch{ transition:background .3s ease; }
+@media (prefers-reduced-motion: reduce){ .brick.recolour{ animation:none; } }

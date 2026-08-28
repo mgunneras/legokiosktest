@@ -274,9 +274,21 @@ Two asks, both in the tray footer:
   rising triad, then ~2.8s later the suggestion drops in underneath with a
   scatter of high pings. The gap is the point — the first has been read by the
   time the second arrives, instead of both landing as one block. The suggestion
-  is tinted and bordered in the accent so the two read differently before either
-  is read at all. A newer answer cancels a pending second beat, so two quick
-  presses cannot interleave.
+  is tinted **green**, not red: red already means invalid here — the refused
+  ghost, the blocked highlight — so a red suggestion reads as an error rather
+  than an invitation. Green is this interface's existing "all good", from the
+  key button. A newer answer cancels a pending second beat, so two quick presses
+  cannot interleave.
+
+  It also returns a **palette**, two to four colour names, and the tray refills
+  with them on the same beat as the sparkle — so "an azure swimming pool" is
+  followed by a tray of azures. Nothing in the catalogue is mutated: a piece
+  dragged out carries a *copy* of its definition with the colour of the moment
+  baked in, so everything already on the board keeps the colour it was built in
+  after the tray moves on. The tray line Gemini receives is generated from the
+  current colours, so it always knows what it actually has to work with. Colour
+  names are checked against the real list, with a fallback that reads them out of
+  the sentence if the field is missing, and CLEAR restores the tray.
 
   The ambition has to be held down explicitly, and the examples in the prompt do
   most of that work. An earlier version offered "a mouse for the cat to chase, a

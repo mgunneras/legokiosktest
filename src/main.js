@@ -91,7 +91,16 @@ const CATALOG = [
   { id:'r98138', w:1, d:1, p:1, c:C.black,  page:2, shape:'round', tile:true, part:'98138', label:'round tile 1x1' },
   { id:'r4150',  w:2, d:2, p:1, c:C.tan,    page:2, shape:'round', tile:true, part:'4150',  label:'round tile 2x2' },
 ];
+/* The tray can be re-tinted to whatever Gemini just suggested. Nothing in the
+   catalogue is mutated: a piece dragged out carries a *copy* of its definition
+   with the colour of the moment baked in, so anything already on the board keeps
+   the colour it was built in even after the tray moves on. */
+const GI = new Map();
+let tray = null;                       // null = each piece's own colour
+const colourOf = def => tray ? tray[(GI.get(def) ?? 0) % tray.length] : def.c;
+
 const PAGE_NAMES = ['BRICKS', 'SLOPES', 'CURVES'];
+CATALOG.forEach((d, i) => GI.set(d, i));
 const PAGES = PAGE_NAMES.map((_, n) => CATALOG.filter(d => d.page === n));
 const label = b => b.label || `${b.d}x${b.w}${b.p === 1 ? ' plate' : ''}`;
 
@@ -1299,14 +1308,14 @@ let page = 0;
 
 /* The tray shows one page at a time; the catalogue behind it is always whole,
    so Gemini's piece indices stay valid whichever page happens to be open. */
-function renderPalette() {
+function renderPalette(flash) {
   paletteEl.replaceChildren();
   PAGES[page].forEach((def, idx) => {
     const el = document.createElement('div');
     el.className = 'brick' + (idx === 0 ? ' active' : '');
     const sw = document.createElement('div');
     sw.className = 'swatch' + (def.shape ? ' ' + def.shape : '');
-    sw.style.background = def.c;
+    sw.style.background = colourOf(def);
     sw.style.gridTemplateColumns = `repeat(${def.w}, var(--stud))`;
     for (let n = 0; n < def.w * def.d; n++) sw.appendChild(document.createElement('i'));
     const lb = document.createElement('div');
@@ -1314,6 +1323,7 @@ function renderPalette() {
     lb.textContent = label(def);
     if (def.part) el.title = `part ${def.part}`;
     el.append(sw, lb);
+    if (flash) { el.classList.add('recolour'); el.style.animationDelay = idx * 40 + 'ms'; }
     paletteEl.appendChild(el);
 
     el.addEventListener('pointerdown', e => {
@@ -1325,7 +1335,8 @@ function renderPalette() {
       el.classList.add('press');
       selected = idx;
       [...paletteEl.children].forEach((c, i) => c.classList.toggle('active', i === idx));
-      beginDrag(e, def, el);
+      // a copy, so the colour it leaves the tray with is the colour it keeps
+      beginDrag(e, { ...def, c: colourOf(def) }, el);
     });
   });
   pageStateEl.textContent = `${PAGE_NAMES[page]} ${page + 1}/${PAGES.length}`;
@@ -1343,6 +1354,7 @@ tap('btnClear', () => {
   demolish();
   chat.length = 0;                       // new build, new conversation
   lastTally = null;
+  tray = null; renderPalette();          // ...and the tray back to its own colours
 });
 tap('btnHome', () => { view.taz = HOME.az; view.tpol = HOME.pol; view.trad = HOME.rad; });
 tap('btnFull', () => {
@@ -1442,8 +1454,8 @@ function sceneSummary(withTray) {
     out.push('TRAY. index=colour then x<studs along x>z<studs along z>:');
     const kind = d => d.shape === 'invslope' ? '-inv' : d.shape ? '-' + d.shape
                     : d.p === 1 ? '-flat' : '';
-    out.push(CATALOG.map((d, i) =>
-      `${i}=${CODE[COLOUR_NAME[d.c]]}x${d.w}z${d.d}${kind(d)}`).join('  '));
+      out.push(CATALOG.map((d, i) =>
+      `${i}=${CODE[COLOUR_NAME[colourOf(d)]]}x${d.w}z${d.d}${kind(d)}`).join('  '));
   }
   return out.join('\n');
 }
@@ -1475,6 +1487,7 @@ Answer in two parts.
 
 "sees" - what you can see, said with delight. One short sentence, 12 words at most, like "Oh, that's a little house on a hill!"
 "suggests" - the next small thing to add, and roughly where. One short sentence, 16 words at most, like "Why not pop a tree just to the left of it?"
+"palette" - two to four colours your suggestion needs, most important first, chosen from exactly these names: red, blue, yellow, green, white, grey, black, orange, tan, lime, azure, purple. A green tree is green and tan; an azure swimming pool is azure and white. The tray is refilled with these, so name the colours you actually want them holding.
 
 For "suggests", name one small addition that carries what is there a step further. The next feature, not the next subject: two dots that read as eyes want a nose under them, and then a mouth. A wall wants a door. A trunk wants a leafy top. A roofline wants a chimney.
 
@@ -1490,10 +1503,25 @@ Rules for both parts:
 
 const HINT_SCHEMA = {
   type: 'OBJECT',
-  properties: { sees: { type: 'STRING' }, suggests: { type: 'STRING' } },
-  propertyOrdering: ['sees', 'suggests'],
-  required: ['sees', 'suggests'],
+  properties: {
+    sees:     { type: 'STRING' },
+    suggests: { type: 'STRING' },
+    palette:  { type: 'ARRAY', items: { type: 'STRING' } },
+  },
+  propertyOrdering: ['sees', 'suggests', 'palette'],
+  required: ['sees', 'suggests', 'palette'],
 };
+const COLOUR_NAMES = Object.keys(C);
+/* Take the colours it asked for, but only ones that exist. If it named them in
+   the sentence instead of the field, read them out of there. */
+function toPalette(list, text) {
+  let names = (Array.isArray(list) ? list : [])
+    .map(n => String(n).toLowerCase().trim()).filter(n => C[n]);
+  if (!names.length && text)
+    names = COLOUR_NAMES.filter(n => new RegExp(`\\b${n}\\b`, 'i').test(text));
+  names = [...new Set(names)].slice(0, 4);
+  return names.length ? names.map(n => C[n]) : null;
+}
 
 /* The hints are one running conversation, so it can build on what it already
    said instead of starting cold each time. Two things keep that cheap: only the
@@ -1539,7 +1567,7 @@ ${since}
 
 Answer in the same two parts, in the same voice. Carry on from what you already said rather than repeating it: if they took your suggestion, be pleased and name the next small feature after it; if they went their own way, go with theirs.
 
-"sees" is what you can see now, 12 words at most. "suggests" is the next small thing, 16 words at most.
+"sees" is what you can see now, 12 words at most. "suggests" is the next small thing, 16 words at most. "palette" is two to four colour names it needs, from that same list.
 
 Same rules, and the small one especially: one to three pieces of work, growing what is already there rather than starting a new subject beside it. Warm and never sarcastic, buildable out of a few coloured blocks with no lettering or fine detail, and never mention the board itself.`;
 
@@ -1604,7 +1632,7 @@ function say(text, hold = 12000, thinking = false) {
 }
 /* What it sees, then a beat, then what to do about it — so the first has been
    read by the time the second arrives, rather than both landing as one block. */
-function sayPair(sees, suggests) {
+function sayPair(sees, suggests, palette) {
   const mine = ++sayToken;
   bubblesEl.replaceChildren();
   chime();
@@ -1614,6 +1642,9 @@ function sayPair(sees, suggests) {
     if (mine !== sayToken) return;   // a newer answer already took the screen
     sparkle();
     bubble(suggests, 'suggests', SUGGEST_HOLD);
+    // The tray turns over on the same beat as the sparkle, so the colours
+    // arriving reads as part of the suggestion rather than a separate event.
+    if (palette) { tray = palette; renderPalette(true); }
   }, sees ? SECOND_BEAT : 0);
 }
 
@@ -1644,8 +1675,8 @@ tap('btnHint', () => ask('thinking of something...', async () => {
   // dangling user turn behind, which would break the alternation next time.
   const raw = await callGemini([...chat, { role:'user', parts:[{ text: asked }] }],
                                HINT_SCHEMA, true);
-  let sees = '', suggests = '';
-  try { const j = JSON.parse(raw); sees = j.sees || ''; suggests = j.suggests || ''; } catch {}
+  let sees = '', suggests = '', plan = {};
+  try { plan = JSON.parse(raw); sees = plan.sees || ''; suggests = plan.suggests || ''; } catch {}
   if (!sees && !suggests) {              // answered in prose: split at the first stop
     const m = raw.match(/^([\s\S]*?[.!?])\s+([\s\S]+)$/);
     sees = (m ? m[1] : raw).trim();
@@ -1655,7 +1686,7 @@ tap('btnHint', () => ask('thinking of something...', async () => {
              { role:'model', parts:[{ text: `${sees} ${suggests}`.trim() }] });
   while (chat.length > CHAT_TURNS) chat.shift();
   lastTally = tallyByColour();
-  sayPair(sees, suggests);
+  sayPair(sees, suggests, toPalette(plan.palette, suggests));
 }));
 
 /* ---------- key + model panel ---------- */
@@ -1791,4 +1822,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, chat, sinceLast, assemblyOf, toLocal, turnAsm, solveAsm, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayPair, chat, sinceLast, toPalette, colourOf, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
