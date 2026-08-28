@@ -34,7 +34,7 @@ Kiosk shell (Electron — fullscreen, frameless, locked):
 | Plate | release off the build | it lands on the desk and stays there, pickable later |
 | MORE BRICKS | tap | next tray page — bricks, slopes, curves |
 | CLEAR | tap | demolition — the build leaves one brick at a time |
-| WHAT NEXT? | tap | Gemini says what it sees, then suggests one thing to add |
+| WHAT NEXT? | tap | first time, Gemini guesses what it is and you pick; after that it suggests |
 
 Keyboard: `R` rotate, `Z` undo.
 
@@ -271,10 +271,20 @@ actually use, filtered to models supporting `generateContent`.
 
 One ask, in the tray footer:
 
-- **WHAT NEXT?** sends the same snapshot and asks for *the next small thing*,
-  in two parts: `sees` — what it can see, said with delight — and `suggests`,
-  one addition that carries it a step further. It answers in words, not
-  coordinates, and the person places it.
+- **WHAT NEXT?** works in two stages, and the first happens only once.
+
+  **What is it?** On a fresh build, Gemini offers two or three properly
+  different guesses — a plain line could be a pencil, an earthworm, or a crack
+  in the ice — as buttons in a bubble that waits to be answered. Picking one
+  settles the subject for good: it goes into the conversation as the person's
+  own turn ("It's a pencil.") and every later prompt carries *never ask again,
+  never second-guess it*. Waving them away settles it differently — the guesses
+  are recorded as rejected, and later prompts say so and give licence to be
+  surprising instead. Either way the question is asked once per build.
+
+  **What next?** From then on it answers in two parts: `sees`, a warm line about
+  how it is coming along, and `suggests`, one addition that carries it a step
+  further. It answers in words, not coordinates, and the person places it.
 
   They arrive as **two bubbles, a beat apart**: the observation lands with a
   rising triad, then ~2.8s later the suggestion drops in underneath with a

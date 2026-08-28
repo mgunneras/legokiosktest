@@ -1422,6 +1422,7 @@ tap('btnClear', () => {
   demolish();
   chat.length = 0;                       // new build, new conversation
   lastTally = null;
+  subject = null; asked = false; rejected = [];
   tray = null; renderPalette();          // ...and the tray back to its own colours
 });
 tap('btnHome', () => { view.taz = HOME.az; view.tpol = HOME.pol; view.trad = HOME.rad; });
@@ -1528,13 +1529,30 @@ function sceneSummary(withTray) {
   return out.join('\n');
 }
 
+const guessPrompt = scene => `Someone is drawing with coloured pieces on a small board, seen from straight above. Here is what they have so far.
+
+${scene}
+
+Guess what it is meant to be. Give two or three guesses and make them properly different from one another — a plain line could be a pencil, an earthworm, or a crack in the ice. The likeliest guess is not always the best one; be playful.
+
+Each guess is a short noun phrase said the way you would say it out loud, 4 words at most: "a pencil", "a sleepy caterpillar", "a garden path". No punctuation, no explanation.
+
+"question" is one warm, curious line asking which it is, 8 words at most, like "Ooh, what are you making?" Never mention pieces, colours, the board or coordinates.`;
+
+const settled = () =>
+  subject  ? `They have told you what this is: ${subject}. That is settled. Never ask again, never second-guess it, and never offer alternatives — just help them build it.`
+: rejected.length ? `You guessed ${rejected.join(' and ')} and they said it is none of those. Do not guess again and do not ask what it is. Pick a direction yourself and run with it — you can be surprising, even a little odd.`
+: '';
+
 const hintPrompt = scene => `Someone is building a picture out of coloured plastic pieces on a small board, seen from straight above. Here is what they have so far.
 
 ${scene}
 
+${settled()}
+
 Answer in two parts.
 
-"sees" - what you can see, said with delight. One short sentence, 12 words at most, like "Oh, that's a little house on a hill!"
+"sees" - a warm line about how it is coming along, 12 words at most, like "That roof is really taking shape!" Not a guess at what it is if that is already settled.
 "suggests" - the next small thing to add, and roughly where. One short sentence, 16 words at most, like "Why not pop a tree just to the left of it?"
 "palette" - three or four colours to fill the tray with, most important first, chosen from exactly these names:
 ${COLOUR_LIST}
@@ -1551,6 +1569,16 @@ Rules for both parts:
 - Warm and playful. Be pleased with what is there. Never sarcastic, and never call it unfinished, empty or wrong.
 - Buildable out of a few coloured blocks: no lettering, no fine detail.
 - Never mention LEGO, bricks, studs, cells, coordinates or the board itself.`;
+
+const GUESS_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    question: { type: 'STRING' },
+    guesses:  { type: 'ARRAY', items: { type: 'STRING' } },
+  },
+  propertyOrdering: ['question', 'guesses'],
+  required: ['question', 'guesses'],
+};
 
 const HINT_SCHEMA = {
   type: 'OBJECT',
@@ -1599,6 +1627,13 @@ function toPalette(list, text) {
    turn being sent carries the full board, and what is kept in the history is a
    one-line note of what the board looked like then. Otherwise every past turn
    would drag a whole map along with it. */
+/* Settled once per build: what the thing actually is. Gemini guesses, the
+   person picks, and from then on it is taken as given — the question is never
+   asked twice. Waving the guesses away settles it too, differently: it means
+   "none of those", which is licence to be surprising rather than to keep
+   guessing. */
+let subject = null, asked = false, rejected = [];
+
 const chat = [];
 const CHAT_TURNS = 8;                   // four exchanges, then the oldest falls off
 let lastTally = null;
@@ -1633,6 +1668,8 @@ function sinceLast() {
 const followPrompt = (scene, since) => `Here is the board now.
 
 ${scene}
+
+${settled()}
 
 ${since}
 
@@ -1703,6 +1740,31 @@ function say(text, hold = 12000, thinking = false) {
   bubblesEl.replaceChildren();
   bubble(text, thinking ? 'thinking' : '', hold);
 }
+/* The one bubble that takes an answer. It does not time out: it sits there
+   until it is answered or waved away. */
+function askWhich(question, options, onPick, onDismiss) {
+  sayToken++;
+  bubblesEl.replaceChildren();
+  chime();
+  const el = bubble(question, 'asking', 0);
+  const row = document.createElement('div');
+  row.className = 'choices';
+  const close = () => { el.classList.add('gone'); setTimeout(() => el.remove(), 500); };
+  for (const o of options) {
+    const b = document.createElement('button');
+    b.className = 'choice';
+    b.textContent = o;
+    b.addEventListener('click', () => { close(); onPick(o); });
+    row.appendChild(b);
+  }
+  const no = document.createElement('button');
+  no.className = 'choice dismiss';
+  no.textContent = 'neither';
+  no.addEventListener('click', () => { close(); onDismiss(); });
+  row.appendChild(no);
+  el.appendChild(row);
+}
+
 /* What it sees, then a beat, then what to do about it — so the first has been
    read by the time the second arrives, rather than both landing as one block. */
 function sayPair(sees, suggests, palette) {
@@ -1735,26 +1797,48 @@ async function ask(thinkingText, run) {
   finally { asking = false; hintBtn.disabled = false; }
 }
 
-tap('btnHint', () => ask('thinking of something...', async () => {
-  const scene = sceneSummary(false);
-  const asked = chat.length ? followPrompt(scene, sinceLast()) : hintPrompt(scene);
-  // Send the live turn without committing it: a failed call must not leave a
-  // dangling user turn behind, which would break the alternation next time.
-  const raw = await callGemini([...chat, { role:'user', parts:[{ text: asked }] }],
-                               HINT_SCHEMA, true);
-  let sees = '', suggests = '', plan = {};
-  try { plan = JSON.parse(raw); sees = plan.sees || ''; suggests = plan.suggests || ''; } catch {}
-  if (!sees && !suggests) {              // answered in prose: split at the first stop
-    const m = raw.match(/^([\s\S]*?[.!?])\s+([\s\S]+)$/);
-    sees = (m ? m[1] : raw).trim();
-    suggests = m ? m[2].trim() : '';
-  }
-  chat.push({ role:'user',  parts:[{ text: boardLine() }] },   // kept small on purpose
-             { role:'model', parts:[{ text: `${sees} ${suggests}`.trim() }] });
-  while (chat.length > CHAT_TURNS) chat.shift();
-  lastTally = tallyByColour();
-  sayPair(sees, suggests, widenPalette(toPalette(plan.palette, suggests)));
-}));
+/* Second half of the exchange: what to add. `lead` is what the person just told
+   us, and goes into the conversation as their own turn — so the history reads
+   like two people talking rather than a series of unrelated requests. */
+function askSuggestion(lead) {
+  return ask('thinking of something...', async () => {
+    const scene = sceneSummary(false);
+    const body = chat.length && !lead ? followPrompt(scene, sinceLast()) : hintPrompt(scene);
+    const text = lead ? `${lead}\n\n${body}` : body;
+    const raw = await callGemini([...chat, { role:'user', parts:[{ text }] }], HINT_SCHEMA, true);
+    let sees = '', suggests = '', plan = {};
+    try { plan = JSON.parse(raw); sees = plan.sees || ''; suggests = plan.suggests || ''; } catch {}
+    if (!sees && !suggests) {
+      const m = raw.match(/^([\s\S]*?[.!?])\s+([\s\S]+)$/);
+      sees = (m ? m[1] : raw).trim();
+      suggests = m ? m[2].trim() : '';
+    }
+    chat.push({ role:'user',  parts:[{ text: lead ? `${lead} ${boardLine()}` : boardLine() }] },
+              { role:'model', parts:[{ text: `${sees} ${suggests}`.trim() }] });
+    while (chat.length > CHAT_TURNS) chat.shift();
+    lastTally = tallyByColour();
+    sayPair(sees, suggests, widenPalette(toPalette(plan.palette, suggests)));
+  });
+}
+
+/* First press on a fresh build asks what it is; after that it never does. */
+tap('btnHint', () => {
+  if (asked) return askSuggestion(null);
+  return ask('having a look...', async () => {
+    const raw = await callGemini(
+      [...chat, { role:'user', parts:[{ text: guessPrompt(sceneSummary(false)) }] }],
+      GUESS_SCHEMA, true);
+    let q = '', guesses = [];
+    try { const j = JSON.parse(raw); q = j.question || ''; guesses = j.guesses || []; } catch {}
+    guesses = guesses.map(g => String(g).trim()).filter(Boolean).slice(0, 3);
+    if (!guesses.length) { asked = true; return askSuggestion(null); }   // it would not guess
+    chat.push({ role:'user',  parts:[{ text: boardLine() }] },
+              { role:'model', parts:[{ text: `Is it ${guesses.join(', or ')}?` }] });
+    askWhich(q || 'What are you making?', guesses,
+      pick => { asked = true; subject = pick; askSuggestion(`It's ${pick}.`); },
+      ()   => { asked = true; rejected = guesses; });
+  });
+});
 
 /* ---------- key + model panel ---------- */
 const keyBtn    = document.getElementById('btnKey');
@@ -1889,4 +1973,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayPair, chat, sinceLast, toPalette, widenPalette, colourOf, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayPair, askWhich, chat, sinceLast, get subject(){ return subject; }, get asked(){ return asked; }, get rejected(){ return rejected; }, toPalette, widenPalette, colourOf, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
