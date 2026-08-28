@@ -112,26 +112,33 @@ const add = o => {
 
 for (const [w, d, part] of [
   [1,1,'3005'],[2,1,'3004'],[3,1,'3622'],[4,1,'3010'],[6,1,'3009'],[8,1,'3008'],
-  [10,1,'6111'],[12,1,'6112'],[16,1,'2465'],
-  [2,2,'3003'],[3,2,'3002'],[4,2,'3001'],[6,2,'2456'],[8,2,'3007'],[10,2,'3006'],[6,4,'2356'],
+  [2,2,'3003'],[3,2,'3002'],[4,2,'3001'],[6,2,'2456'],[8,2,'3007'],[6,4,'2356'],
 ]) add({ id:`b${w}x${d}`, w, d, p:3, part, family:'brick', label:`${d}x${w} brick` });
 
 for (const [w, d, p, part] of [                       // taller than one brick
-  [2,1,6,'3245'],[1,1,9,'22886'],[1,1,15,'2453'],[2,1,15,'2454'],
+  [2,1,6,'3245'],[1,1,9,'22886'],[1,1,15,'2453'],[2,1,15,'2454'],[2,1,5,'22885'],
 ]) add({ id:`t${w}x${d}x${p}`, w, d, p, part, family:'brick', label:`${d}x${w} tall brick` });
+
+// Real elements whose surface detail is not modelled — the shape and footprint
+// are right, the masonry pattern and side studs are not there.
+for (const [w, d, part, name] of [
+  [2,1,'98283','masonry brick 1x2'], [4,1,'30414','brick 1x4 side studs'],
+]) add({ id:`x${part}`, w, d, p:3, part, family:'brick', label:name });
+
+for (const [w, d, part, name] of [
+  [2,1,'2412','grille tile 1x2'],
+]) add({ id:`x${part}`, w, d, p:1, part, tile:true, family:'tile', label:name });
 
 for (const [w, d, part] of [
   [1,1,'3024'],[2,1,'3023'],[3,1,'3623'],[4,1,'3710'],[6,1,'3666'],[8,1,'3460'],
-  [10,1,'4477'],[12,1,'60479'],
-  [2,2,'3022'],[3,2,'3021'],[4,2,'3020'],[6,2,'3795'],[8,2,'3034'],[10,2,'3832'],[12,2,'2445'],[16,2,'4282'],
-  [3,3,'11212'],[4,4,'3031'],[6,4,'3032'],[8,4,'3035'],[10,4,'3030'],[12,4,'3029'],
-  [6,6,'3958'],[8,6,'3036'],[10,6,'3033'],[12,6,'3028'],[8,8,'41539'],
+  [2,2,'3022'],[3,2,'3021'],[4,2,'3020'],[6,2,'3795'],[8,2,'3034'],
+  [3,3,'11212'],[4,4,'3031'],[6,4,'3032'],[8,4,'3035'],
 ]) add({ id:`p${w}x${d}`, w, d, p:1, part, family:'plate', label:`${d}x${w} plate` });
 
 // tiles have no studs at all, which the grid has to know about
 for (const [w, d, part] of [
   [1,1,'3070'],[2,1,'3069'],[3,1,'63864'],[4,1,'2431'],[6,1,'6636'],[8,1,'4162'],
-  [2,2,'3068'],[3,2,'26603'],[4,2,'87079'],[6,2,'69729'],[4,4,'1751'],[6,6,'10202'],
+  [2,2,'3068'],[3,2,'26603'],[4,2,'87079'],[6,2,'69729'],[4,4,'1751'],
 ]) add({ id:`f${w}x${d}`, w, d, p:1, part, tile:true, family:'tile', label:`${d}x${w} tile` });
 
 for (const o of [
@@ -139,13 +146,14 @@ for (const o of [
   { id:'s3039',  w:2, d:2, p:3, run:1, part:'3039',  label:'slope 45 2x2' },
   { id:'s3038',  w:3, d:2, p:3, run:1, part:'3038',  label:'slope 45 2x3' },
   { id:'s3037',  w:4, d:2, p:3, run:1, part:'3037',  label:'slope 45 2x4' },
-  { id:'s4445',  w:8, d:2, p:3, run:1, part:'4445',  label:'slope 45 2x8' },
   { id:'s4286',  w:3, d:1, p:3, run:2, part:'4286',  label:'slope 33 3x1' },
   { id:'s3298',  w:3, d:2, p:3, run:2, part:'3298',  label:'slope 33 3x2' },
   { id:'s4161',  w:3, d:3, p:3, run:2, part:'4161',  label:'slope 33 3x3' },
   { id:'s3299',  w:4, d:3, p:3, run:2, part:'3299',  label:'slope 33 3x4' },
   { id:'s54200', w:1, d:1, p:2, run:1, part:'54200', label:'cheese slope' },
   { id:'s85984', w:2, d:1, p:2, run:1, part:'85984', label:'slope 30 1x2' },
+  { id:'s50746', w:2, d:1, p:2, run:1, part:'50746', label:'slope 31 1x2' },
+  { id:'s61409', w:2, d:1, p:2, run:1, part:'61409', label:'slope 18 1x2 grille' },
   { id:'s60481', w:2, d:1, p:6, run:1, part:'60481', label:'slope 65 2x1x2' },
   { id:'s4460',  w:2, d:1, p:9, run:1, part:'4460',  label:'slope 75 2x1x3' },
 ]) add({ ...o, shape:'slope', family:'slope' });
@@ -162,7 +170,6 @@ for (const o of [
   { id:'c11477', w:2, d:1, p:3, flat:1, part:'11477', label:'curve 2x1' },
   { id:'c50950', w:3, d:1, p:3, flat:1, part:'50950', label:'curve 3x1' },
   { id:'c61678', w:4, d:1, p:3, flat:1, part:'61678', label:'curve 4x1' },
-  { id:'c42022', w:6, d:1, p:3, flat:1, part:'42022', label:'curve 6x1' },
   { id:'c15068', w:2, d:2, p:3, flat:1, part:'15068', label:'curve 2x2' },
   { id:'c93606', w:4, d:2, p:3, flat:1, part:'93606', label:'curve 4x2' },
   { id:'c6091',  w:2, d:1, p:4, flat:0, part:'6091',  label:'curved top 2x1' },
@@ -177,6 +184,25 @@ for (const o of [
   { id:'a3455', w:6, d:1, p:3, part:'3455', label:'arch 1x6' },
 ]) add({ ...o, shape:'arch', family:'arch' });
 
+/* Curved in plan rather than in profile — what you see looking down is the
+   curve. Footprint stays the rectangle it sits in, as with every other shape;
+   only the studs know about the missing corner. */
+for (const o of [
+  { id:'q3063',  w:2, d:2, p:3, part:'3063',  label:'round corner 2x2' },
+  { id:'q27925', w:2, d:2, p:1, part:'27925', tile:true, label:'round corner tile 2x2' },
+  { id:'q25269', w:1, d:1, p:1, part:'25269', tile:true, label:'quarter round tile' },
+  { id:'q85080', w:1, d:1, p:1, part:'85080', label:'quarter round plate' },
+]) add({ ...o, shape:'quarter', family:'curve' });
+
+for (const o of [
+  { id:'w26601', w:2, d:2, p:1, part:'26601', label:'cut corner plate 2x2' },
+  { id:'w51739', w:4, d:2, p:1, part:'51739', label:'wedge plate 2x4' },
+  { id:'w43722', w:3, d:2, p:1, part:'43722', label:'wedge plate 2x3' },
+  { id:'w43723', w:3, d:2, p:1, part:'43723', label:'wedge plate 2x3 left' },
+  { id:'w41769', w:4, d:2, p:1, part:'41769', label:'wedge plate 2x4 right' },
+  { id:'w41770', w:4, d:2, p:1, part:'41770', label:'wedge plate 2x4 left' },
+]) add({ ...o, shape:'wedge', family:'curve', cut:o.id === 'w26601' });
+
 for (const o of [
   { id:'k4589', w:1, d:1, p:2, part:'4589', label:'cone 1x1' },
   { id:'k3942', w:2, d:2, p:6, part:'3942', label:'cone 2x2x2' },
@@ -188,16 +214,15 @@ for (const o of [
   { id:'d30367', w:2, d:2, p:5, part:'30367', label:'dome 2x2 tall' },
 ]) add({ ...o, shape:'dome', family:'round', tile:true });
 
-for (const [w, d, part] of [[14,2,'91988'],[16,6,'3027']])
-  add({ id:`p${w}x${d}`, w, d, p:1, part, family:'plate', label:`${d}x${w} plate` });
-
 for (const o of [
   { id:'r3062',  w:1, d:1, p:3, part:'3062',  label:'round brick 1x1' },
   { id:'r3941',  w:2, d:2, p:3, part:'3941',  label:'round brick 2x2' },
   { id:'r6141',  w:1, d:1, p:1, part:'6141',  label:'round plate 1x1' },
   { id:'r4032',  w:2, d:2, p:1, part:'4032',  label:'round plate 2x2' },
+  { id:'r4073',  w:1, d:1, p:1, part:'4073',  label:'round plate 1x1 open' },
+  { id:'r6143',  w:2, d:2, p:3, part:'6143',  label:'round brick 2x2 open' },
+  { id:'r87081', w:4, d:4, p:3, part:'87081', label:'round brick 4x4' },
   { id:'r60474', w:4, d:4, p:1, part:'60474', label:'round plate 4x4' },
-  { id:'r11213', w:6, d:6, p:1, part:'11213', label:'round plate 6x6' },
   { id:'r98138', w:1, d:1, p:1, part:'98138', tile:true, label:'round tile 1x1' },
   { id:'r4150',  w:2, d:2, p:1, part:'4150',  tile:true, label:'round tile 2x2' },
   { id:'r67095', w:3, d:3, p:1, part:'67095', tile:true, label:'round tile 3x3' },
@@ -497,6 +522,26 @@ function shapeGeo(def) {
     g.translate(0, h / 2, 0);
     return g;
   }
+  // A plan shape is drawn looking down and extruded upward, so the profile
+  // branches below never see it. After rotateX(-90) the extrusion axis is up
+  // and the plan's own y has landed on world -z, hence the +d/2 shift back.
+  if (def.shape === 'quarter' || def.shape === 'wedge') {
+    const sh = new THREE.Shape();
+    if (def.shape === 'quarter') {
+      sh.moveTo(0, 0); sh.lineTo(w, 0);
+      sh.absarc(0, 0, w, 0, Math.PI / 2, false);
+      sh.lineTo(0, 0);
+    } else if (def.cut) {                       // square with one corner taken off
+      sh.moveTo(0, 0); sh.lineTo(w, 0); sh.lineTo(w, d - 1);
+      sh.lineTo(w - 1, d); sh.lineTo(0, d); sh.lineTo(0, 0);
+    } else {                                    // tapers away to half its depth
+      sh.moveTo(0, 0); sh.lineTo(w, 0); sh.lineTo(w, d); sh.lineTo(0, d / 2); sh.lineTo(0, 0);
+    }
+    const g = new THREE.ExtrudeGeometry(sh, { depth: h, bevelEnabled: false, curveSegments: 18 });
+    g.rotateX(-Math.PI / 2);
+    g.translate(-w / 2, 0, d / 2);
+    return g;
+  }
   if (def.shape === 'cone') {
     const g = new THREE.CylinderGeometry(w * 0.31, w / 2, h, 20);
     g.translate(0, h / 2, 0);
@@ -535,10 +580,15 @@ const geoFor = def => {
 };
 /* Studs only where there is full-height top to put them on — which is also
    exactly where another piece may later rest. A tile has none anywhere. */
-function studAt(def, i) {
+function studAt(def, i, j) {
   if (def.tile) return false;
   if (def.shape === 'slope') return def.w > def.run && i >= def.w - def.run;
   if (def.shape === 'curve') return def.w > (def.flat ?? 1) && i >= def.w - (def.flat ?? 1);
+  // plan shapes: only where there is actually material under the stud
+  if (def.shape === 'quarter') return Math.hypot(i + 0.5, j + 0.5) <= def.w - 0.15;
+  if (def.shape === 'wedge')
+    return def.cut ? (i + 0.5) + (j + 0.5) < def.w + def.d - 1
+                   : (j + 0.5) <= def.d * (0.5 + 0.5 * (i + 0.5) / def.w);
   return true;   // plain, inverted, arch, cone and round: studs the whole way across
 }
 
@@ -574,8 +624,8 @@ function buildBrick(def, ghost = false, tintHex = null) {
   g.add(body);
 
   for (let i = 0; i < def.w; i++) {
-    if (!studAt(def, i)) continue;
     for (let j = 0; j < def.d; j++) {
+      if (!studAt(def, i, j)) continue;
       const s = new THREE.Mesh(studGeo, mat);
       s.position.set(i - (def.w - 1) / 2, h + STUD_H / 2, j - (def.d - 1) / 2);
       s.castShadow = !ghost;
@@ -650,15 +700,13 @@ const canMate = (i, j) => matable[j * GRID + i] === 1;
    not a swap of its width and depth — for a wedge those are different solids —
    so the piece's own column `li` lands at a different world column each way. */
 function stamp(def, sol, rot, top) {
-  for (let li = 0; li < def.w; li++) {
-    const studs = studAt(def, li) ? 1 : 0;
+  for (let li = 0; li < def.w; li++)
     for (let lj = 0; lj < def.d; lj++) {
       const wi = rot ? sol.i0 + lj : sol.i0 + li;
       const wj = rot ? sol.j0 + (def.w - 1 - li) : sol.j0 + lj;
       setH(wi, wj, top);
-      matable[wj * GRID + wi] = studs;
+      matable[wj * GRID + wi] = studAt(def, li, lj) ? 1 : 0;
     }
-  }
 }
 const drop1 = (arr, v) => { const i = arr.indexOf(v); if (i >= 0) arr.splice(i, 1); };
 
@@ -1536,7 +1584,9 @@ function renderPalette(flash) {
 const tap = (id, fn) => document.getElementById(id)
   .addEventListener('pointerdown', e => { e.preventDefault(); fn(); });
 scramble();
-tap('btnPage', scramble);
+tap('btnShuffle', scramble);
+// colours only: keep the pieces you are looking at, roll new colours onto them
+tap('btnColours', () => { paintTray(null); renderPalette(true); });
 /* No button for this any more — throwing earned its place. F still toggles it,
    for when a flick needs ruling out while chasing something else.           */
 const toggleFlick = () => { flickOn = !flickOn; };

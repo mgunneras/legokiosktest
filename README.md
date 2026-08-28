@@ -32,7 +32,8 @@ Kiosk shell (Electron — fullscreen, frameless, locked):
 | Plate | press and hold a brick (180ms) | it and everything on it lift into your hand as one lump |
 | Plate | double-tap a brick | it gets chucked off the table |
 | Plate | release off the build | it lands on the desk and stays there, pickable later |
-| MORE BRICKS | tap | a fresh random dozen out of 105, in fresh colours |
+| SHUFFLE | tap | a fresh random dozen out of 102 |
+| COLOURS | tap | new colours on the pieces already in the tray |
 | Plate | 2 finger drag | slide the board around, as well as pinch and spin |
 | CLEAR | tap | demolition — the build leaves one brick at a time |
 | WHAT NEXT? | tap | first time, Gemini guesses what it is and you pick; after that it suggests |
@@ -60,11 +61,22 @@ Keyboard: `R` rotate, `Z` undo.
   piece's own columns to world columns accordingly. The angles are geometry rather than marketing: a brick-height fall
   across one stud is ~50°, which is the element everyone calls a 45; across two
   studs it is ~31°, the one called a 33.
-- **105 real parts**, every one with its BrickLink number: bricks, plates, tiles,
-  slopes, inverted slopes, curves, arches, cones, domes and round parts. The
-  rectangular families are generated because they are systematic in life too;
-  the shaped parts are listed one by one because they are not.
-- **MORE BRICKS shuffles rather than pages.** A dozen at a time, stratified so
+- **102 real parts**, every one with its BrickLink number: bricks, plates, tiles,
+  slopes, inverted slopes, curves, arches, cones, domes, round parts, and the
+  ones that are curved *in plan* — quarter rounds, round corners, wedges and cut
+  corners, where the curve is what you see looking down. The rectangular families
+  are generated because they are systematic in life too; the shaped parts are
+  listed one by one because they are not.
+- Nothing longer than 8 studs or deeper than 4. Big flat sheets and very long
+  slopes both looked wrong: a slope that falls across one stud in eight is a
+  brick with a bevel on it, not a slope.
+- A plan shape is drawn looking down and extruded upward, so the profile shapes
+  and the plan shapes never share a code path. Studs follow the outline — a
+  round corner 2x2 has three, not four, because the fourth would float over the
+  missing corner, and `matable` follows the studs, so nothing rests there either.
+- **Two buttons.** SHUFFLE deals a fresh dozen; COLOURS keeps the pieces you are
+  looking at and rolls new colours onto them, for when the shape is right and the
+  colour is not. A dozen at a time, stratified so
   one from each family is guaranteed before the rest fill at random — otherwise
   a shuffle comes back as twelve plates. Colours are re-drawn at the same time,
   a dozen different ones, shuffled across the slots so the same shade is never
