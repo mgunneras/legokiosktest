@@ -282,15 +282,15 @@ One ask, in the tray footer:
   are recorded as rejected, and later prompts say so and give licence to be
   surprising instead. Either way the question is asked once per build.
 
-  **What next?** From then on it answers in two parts: `sees`, a warm line about
-  how it is coming along, and `suggests`, one addition that carries it a step
-  further. It answers in words, not coordinates, and the person places it.
+  **What next?** From then on it is one green instruction per press and nothing
+  else. There is deliberately no "here is what I can see" line: it is looking at
+  the same board every time, so that only ever restates what the person is
+  already staring at. Dropping it also gives the two sounds distinct jobs — the
+  chime belongs to the question, the sparkle to an idea landing — and makes
+  repeated presses read as momentum: do this, then this, then this. It answers in
+  words, not coordinates, and the person places it.
 
-  They arrive as **two bubbles, a beat apart**: the observation lands with a
-  rising triad, then ~2.8s later the suggestion drops in underneath with a
-  scatter of high pings. The gap is the point — the first has been read by the
-  time the second arrives, instead of both landing as one block. The suggestion
-  is tinted **green**, not red: red already means invalid here — the refused
+  The suggestion is tinted **green**, not red: red already means invalid here — the refused
   ghost, the blocked highlight — so a red suggestion reads as an error rather
   than an invitation. Green is this interface's existing "all good", from the
   key button. A newer answer cancels a pending second beat, so two quick presses

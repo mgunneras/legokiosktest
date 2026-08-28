@@ -1550,9 +1550,8 @@ ${scene}
 
 ${settled()}
 
-Answer in two parts.
+Answer in two parts. Do not describe what you can see — that is settled and they are looking at it. Go straight to the doing.
 
-"sees" - a warm line about how it is coming along, 12 words at most, like "That roof is really taking shape!" Not a guess at what it is if that is already settled.
 "suggests" - the next small thing to add, and roughly where. One short sentence, 16 words at most, like "Why not pop a tree just to the left of it?"
 "palette" - three or four colours to fill the tray with, most important first, chosen from exactly these names:
 ${COLOUR_LIST}
@@ -1565,7 +1564,7 @@ Keep the ask small:
 - Grow what is already there rather than starting something else somewhere else. Suggest something brand new only when the board is nearly bare.
 - Point roughly where it goes: "just under them", "along the top of it", "one either side".
 
-Rules for both parts:
+Rules:
 - Warm and playful. Be pleased with what is there. Never sarcastic, and never call it unfinished, empty or wrong.
 - Buildable out of a few coloured blocks: no lettering, no fine detail.
 - Never mention LEGO, bricks, studs, cells, coordinates or the board itself.`;
@@ -1580,15 +1579,17 @@ const GUESS_SCHEMA = {
   required: ['question', 'guesses'],
 };
 
+/* No "what I can see" field. It is looking at the same board every time, so
+   after the guesses are settled that line only ever restates what the person is
+   already staring at. One green instruction per press reads as momentum. */
 const HINT_SCHEMA = {
   type: 'OBJECT',
   properties: {
-    sees:     { type: 'STRING' },
     suggests: { type: 'STRING' },
     palette:  { type: 'ARRAY', items: { type: 'STRING' } },
   },
-  propertyOrdering: ['sees', 'suggests', 'palette'],
-  required: ['sees', 'suggests', 'palette'],
+  propertyOrdering: ['suggests', 'palette'],
+  required: ['suggests', 'palette'],
 };
 const COLOUR_NAMES = Object.keys(C);
 const COLOUR_LIST = COLOUR_NAMES.join(', ');
@@ -1675,7 +1676,7 @@ ${since}
 
 Answer in the same two parts, in the same voice. Carry on from what you already said rather than repeating it: if they took your suggestion, be pleased and name the next small feature after it; if they went their own way, go with theirs.
 
-"sees" is what you can see now, 12 words at most. "suggests" is the next small thing, 16 words at most. "palette" is three or four colour names, again from exactly this list:
+Do not describe the board again — they can see it, and you have said it before. Go straight to the next thing to do. "suggests" is that, 16 words at most. "palette" is three or four colour names, again from exactly this list:
 ${COLOUR_LIST}
 What the suggestion needs, plus at least one colour that is not on the board yet. Keep introducing new ones - repeating the same few every turn makes the tray dull, and there are plenty to choose from.
 
@@ -1721,7 +1722,7 @@ async function listModels(key) {
 
 /* ---------- what Gemini says ---------- */
 const bubblesEl = document.getElementById('bubbles');
-const SEES_HOLD = 24000, SUGGEST_HOLD = 21000, SECOND_BEAT = 2800;
+const SUGGEST_HOLD = 21000;
 let sayToken = 0;                    // anything newer cancels a pending second beat
 
 function bubble(text, kind, hold) {
@@ -1765,22 +1766,16 @@ function askWhich(question, options, onPick, onDismiss) {
   el.appendChild(row);
 }
 
-/* What it sees, then a beat, then what to do about it — so the first has been
-   read by the time the second arrives, rather than both landing as one block. */
-function sayPair(sees, suggests, palette) {
-  const mine = ++sayToken;
+/* One instruction, and the tray turning over on the same beat as the sparkle,
+   so the colours arriving read as part of the idea rather than a separate
+   event. The chime belongs to the question; the sparkle to an idea landing. */
+function sayIdea(suggests, palette) {
+  sayToken++;
   bubblesEl.replaceChildren();
-  chime();
-  if (sees) bubble(sees, 'sees', SEES_HOLD);
   if (!suggests) return;
-  setTimeout(() => {
-    if (mine !== sayToken) return;   // a newer answer already took the screen
-    sparkle();
-    bubble(suggests, 'suggests', SUGGEST_HOLD);
-    // The tray turns over on the same beat as the sparkle, so the colours
-    // arriving reads as part of the suggestion rather than a separate event.
-    if (palette) { tray = palette; renderPalette(true); }
-  }, sees ? SECOND_BEAT : 0);
+  sparkle();
+  bubble(suggests, 'suggests', SUGGEST_HOLD);
+  if (palette) { tray = palette; renderPalette(true); }
 }
 
 /* ---------- the two asks ---------- */
@@ -1806,18 +1801,14 @@ function askSuggestion(lead) {
     const body = chat.length && !lead ? followPrompt(scene, sinceLast()) : hintPrompt(scene);
     const text = lead ? `${lead}\n\n${body}` : body;
     const raw = await callGemini([...chat, { role:'user', parts:[{ text }] }], HINT_SCHEMA, true);
-    let sees = '', suggests = '', plan = {};
-    try { plan = JSON.parse(raw); sees = plan.sees || ''; suggests = plan.suggests || ''; } catch {}
-    if (!sees && !suggests) {
-      const m = raw.match(/^([\s\S]*?[.!?])\s+([\s\S]+)$/);
-      sees = (m ? m[1] : raw).trim();
-      suggests = m ? m[2].trim() : '';
-    }
+    let suggests = '', plan = {};
+    try { plan = JSON.parse(raw); suggests = plan.suggests || ''; } catch {}
+    if (!suggests) suggests = raw.replace(/^["'\s]+|["'\s]+$/g, '');   // answered in prose
     chat.push({ role:'user',  parts:[{ text: lead ? `${lead} ${boardLine()}` : boardLine() }] },
-              { role:'model', parts:[{ text: `${sees} ${suggests}`.trim() }] });
+              { role:'model', parts:[{ text: suggests }] });
     while (chat.length > CHAT_TURNS) chat.shift();
     lastTally = tallyByColour();
-    sayPair(sees, suggests, widenPalette(toPalette(plan.palette, suggests)));
+    sayIdea(suggests, widenPalette(toPalette(plan.palette, suggests)));
   });
 }
 
@@ -1973,4 +1964,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayPair, askWhich, chat, sinceLast, get subject(){ return subject; }, get asked(){ return asked; }, get rejected(){ return rejected; }, toPalette, widenPalette, colourOf, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayIdea, askWhich, chat, sinceLast, get subject(){ return subject; }, get asked(){ return asked; }, get rejected(){ return rejected; }, toPalette, widenPalette, colourOf, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
