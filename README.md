@@ -32,7 +32,8 @@ Kiosk shell (Electron — fullscreen, frameless, locked):
 | Plate | press and hold a brick (180ms) | it and everything on it lift into your hand as one lump |
 | Plate | double-tap a brick | it gets chucked off the table |
 | Plate | release off the build | it lands on the desk and stays there, pickable later |
-| MORE BRICKS | tap | next tray page — bricks, slopes, curves |
+| MORE BRICKS | tap | a fresh random dozen out of 105, in fresh colours |
+| Plate | 2 finger drag | slide the board around, as well as pinch and spin |
 | CLEAR | tap | demolition — the build leaves one brick at a time |
 | WHAT NEXT? | tap | first time, Gemini guesses what it is and you pick; after that it suggests |
 
@@ -59,8 +60,21 @@ Keyboard: `R` rotate, `Z` undo.
   piece's own columns to world columns accordingly. The angles are geometry rather than marketing: a brick-height fall
   across one stud is ~50°, which is the element everyone calls a 45; across two
   studs it is ~31°, the one called a 33.
-- The tray pages, but `CATALOG` stays whole behind it, so Gemini's piece indices
-  are valid whichever page happens to be open.
+- **105 real parts**, every one with its BrickLink number: bricks, plates, tiles,
+  slopes, inverted slopes, curves, arches, cones, domes and round parts. The
+  rectangular families are generated because they are systematic in life too;
+  the shaped parts are listed one by one because they are not.
+- **MORE BRICKS shuffles rather than pages.** A dozen at a time, stratified so
+  one from each family is guaranteed before the rest fill at random — otherwise
+  a shuffle comes back as twelve plates. Colours are re-drawn at the same time,
+  a dozen different ones, shuffled across the slots so the same shade is never
+  in the same corner.
+- **Every shape carries its own mating rule**, and they are tested together:
+  bricks, plates, arches, cones and inverted slopes take a piece anywhere on
+  top; tiles, round tiles and domes take nothing at all; slopes and curves only
+  on their flat studded end. A 1x1 slope is *all* slope, so it has no studs — an
+  earlier version gave the cheese slope a stud because the flat portion was
+  computed as `w - run` without checking it was greater than zero.
 - `heights` is an `Int16Array(16*16)` of stacked plate counts per stud column.
   Placement raycasts the baseplate + placed bricks, converts the hit to a grid
   cell, and takes the max column height under the footprint.
@@ -88,6 +102,11 @@ Keyboard: `R` rotate, `Z` undo.
   the plate under a stationary finger updates the landing spot and the snap.
 - The held brick rides the finger's ray at a fixed height, lifted along the
   camera's up axis so it doesn't cover its own landing ghost.
+- **Two fingers slide the board as well as pinch and spin it.** The pan moves
+  the look-at point rather than swinging the camera, so the board travels across
+  the screen at the same angle instead of being viewed from somewhere new, and
+  it is applied in the board's own plane as it appears on screen — push right
+  and it goes right whichever way round it has been spun. RESET VIEW recentres.
 - **The lamp belongs to the room, not to the board.** The board is static in
   world space and the camera is what orbits, so a world-fixed light stays fixed
   *relative to the board* and its shadows never move — it reads as walking
@@ -374,6 +393,15 @@ also runs with `thinkingBudget: 0`, since a fourteen-word answer needs no
 reasoning tokens and 2.5 bills them as output; the guard is narrow because only
 the flash models accept a zero budget, and finish keeps its thinking where it
 earns its cost.
+
+**The map is drawn from where the person is sitting.** It used to be in fixed
+world axes, so spinning the board a quarter turn left Gemini's "left" pointing
+somewhere else entirely — it would read the picture rotated and then suggest
+something that made no sense from this side of the screen. The grid is now
+rotated by the view's own quarter-turn count before it is written out, so left
+on the map is the person's left. That matters most for the suggestions, which
+talk in directions: "just to its left" has to mean the same thing to both of
+them.
 
 It renders two top-down grids. The first is what the board actually looks like
 from above — one cell per stud, two-letter colour codes, `..` for bare plate,

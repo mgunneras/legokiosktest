@@ -95,63 +95,116 @@ const LEGO = [
   ['pink',                '#fc97ac', 'i'],
 ];
 const C = Object.fromEntries(LEGO.map(([n, h]) => [n, h]));
-/* w = studs along X, d = studs along Z, p = height in plates. `page` is only
-   which tray page it appears on — Gemini always sees the whole catalogue.
-   Shapes are real elements; the part numbers are there so they can be looked up.
+/* ---------- the parts library ----------
+   Real elements, with BrickLink part numbers where they are certain. The
+   rectangular families (brick, plate, tile) are generated because they are
+   systematic in life too; the shaped parts are listed one by one because they
+   are not. w = studs along X, d = studs along Z, p = height in plates.
    `run` is how many studs a slope falls across, `flat` how many studs of level
-   top a curve keeps before it turns over. Footprint and height are unchanged by
-   shape, so placement, stacking and the grid never learn about any of this. */
-const CATALOG = [
-  // --- page 0: bricks and plates ---
-  { id:'b1x1', w:1, d:1, p:3, c:C['red'],    page:0 },
-  { id:'b1x2', w:2, d:1, p:3, c:C['blue'],   page:0 },
-  { id:'b1x3', w:3, d:1, p:3, c:C['yellow'], page:0 },
-  { id:'b1x4', w:4, d:1, p:3, c:C['green'],  page:0 },
-  { id:'b1x6', w:6, d:1, p:3, c:C['orange'], page:0 },
-  { id:'b1x8', w:8, d:1, p:3, c:C['purple'], page:0 },
-  { id:'b2x2', w:2, d:2, p:3, c:C['white'],  page:0 },
-  { id:'b2x3', w:3, d:2, p:3, c:C['medium azure'],  page:0 },
-  { id:'b2x4', w:4, d:2, p:3, c:C['light bluish gray'],   page:0 },
-  { id:'b2x6', w:6, d:2, p:3, c:C['lime'],   page:0 },
-  { id:'p2x2', w:2, d:2, p:1, c:C['tan'],    page:0 },
-  { id:'p2x4', w:4, d:2, p:1, c:C['black'],  page:0 },
+   top a curve keeps. Footprint and height are all the grid ever sees. */
+const CATALOG = [];
+let nextC = 0;
+const add = o => {
+  o.c = LEGO[(nextC = (nextC + 5) % LEGO.length)][1];   // a default, usually overridden
+  CATALOG.push(o);
+  return o;
+};
 
-  // --- page 1: slopes. A brick-height fall across one stud is ~50 degrees,
-  //     which is the element everyone calls a 45; across two studs it is ~31,
-  //     the one called a 33. The names are LEGO's, the angles are geometry's. ---
-  { id:'s3040',  w:2, d:1, p:3, c:C['red'],    page:1, shape:'slope',    run:1, part:'3040',  label:'slope 45 2x1' },
-  { id:'s3039',  w:2, d:2, p:3, c:C['blue'],   page:1, shape:'slope',    run:1, part:'3039',  label:'slope 45 2x2' },
-  { id:'s3037',  w:4, d:2, p:3, c:C['yellow'], page:1, shape:'slope',    run:1, part:'3037',  label:'slope 45 2x4' },
-  { id:'s4286',  w:3, d:1, p:3, c:C['green'],  page:1, shape:'slope',    run:2, part:'4286',  label:'slope 33 3x1' },
-  { id:'s3298',  w:3, d:2, p:3, c:C['orange'], page:1, shape:'slope',    run:2, part:'3298',  label:'slope 33 3x2' },
-  { id:'s54200', w:1, d:1, p:2, c:C['white'],  page:1, shape:'slope',    run:1, part:'54200', label:'cheese slope' },
-  { id:'s85984', w:2, d:1, p:2, c:C['medium azure'],  page:1, shape:'slope',    run:1, part:'85984', label:'slope 30 2x1' },
-  { id:'s3665',  w:2, d:1, p:3, c:C['light bluish gray'],   page:1, shape:'invslope', run:1, part:'3665',  label:'inverted 2x1' },
-  { id:'s3660',  w:2, d:2, p:3, c:C['tan'],    page:1, shape:'invslope', run:1, part:'3660',  label:'inverted 2x2' },
+for (const [w, d, part] of [
+  [1,1,'3005'],[2,1,'3004'],[3,1,'3622'],[4,1,'3010'],[6,1,'3009'],[8,1,'3008'],
+  [10,1,'6111'],[12,1,'6112'],[16,1,'2465'],
+  [2,2,'3003'],[3,2,'3002'],[4,2,'3001'],[6,2,'2456'],[8,2,'3007'],[10,2,'3006'],[6,4,'2356'],
+]) add({ id:`b${w}x${d}`, w, d, p:3, part, family:'brick', label:`${d}x${w} brick` });
 
-  // --- page 2: curves and round parts ---
-  { id:'c11477', w:2, d:1, p:3, c:C['red'],    page:2, shape:'curve', flat:1, part:'11477', label:'curve 2x1' },
-  { id:'c50950', w:3, d:1, p:3, c:C['blue'],   page:2, shape:'curve', flat:1, part:'50950', label:'curve 3x1' },
-  { id:'c61678', w:4, d:1, p:3, c:C['yellow'], page:2, shape:'curve', flat:1, part:'61678', label:'curve 4x1' },
-  { id:'c15068', w:2, d:2, p:3, c:C['green'],  page:2, shape:'curve', flat:1, part:'15068', label:'curve 2x2' },
-  { id:'c6091',  w:2, d:1, p:4, c:C['purple'], page:2, shape:'curve', flat:0, part:'6091',  label:'curved top' },
-  { id:'r3062',  w:1, d:1, p:3, c:C['orange'], page:2, shape:'round', part:'3062',  label:'round 1x1' },
-  { id:'r3941',  w:2, d:2, p:3, c:C['lime'],   page:2, shape:'round', part:'3941',  label:'round 2x2' },
-  { id:'r98138', w:1, d:1, p:1, c:C['black'],  page:2, shape:'round', tile:true, part:'98138', label:'round tile 1x1' },
-  { id:'r4150',  w:2, d:2, p:1, c:C['tan'],    page:2, shape:'round', tile:true, part:'4150',  label:'round tile 2x2' },
-];
-/* The tray can be re-tinted to whatever Gemini just suggested. Nothing in the
-   catalogue is mutated: a piece dragged out carries a *copy* of its definition
-   with the colour of the moment baked in, so anything already on the board keeps
-   the colour it was built in even after the tray moves on. */
-const GI = new Map();
-let tray = null;                       // null = each piece's own colour
-const colourOf = def => tray ? tray[(GI.get(def) ?? 0) % tray.length] : def.c;
+for (const [w, d, p, part] of [                       // taller than one brick
+  [2,1,6,'3245'],[1,1,9,'22886'],[1,1,15,'2453'],[2,1,15,'2454'],
+]) add({ id:`t${w}x${d}x${p}`, w, d, p, part, family:'brick', label:`${d}x${w} tall brick` });
 
-const PAGE_NAMES = ['BRICKS', 'SLOPES', 'CURVES'];
-CATALOG.forEach((d, i) => GI.set(d, i));
-const PAGES = PAGE_NAMES.map((_, n) => CATALOG.filter(d => d.page === n));
-const label = b => b.label || `${b.d}x${b.w}${b.p === 1 ? ' plate' : ''}`;
+for (const [w, d, part] of [
+  [1,1,'3024'],[2,1,'3023'],[3,1,'3623'],[4,1,'3710'],[6,1,'3666'],[8,1,'3460'],
+  [10,1,'4477'],[12,1,'60479'],
+  [2,2,'3022'],[3,2,'3021'],[4,2,'3020'],[6,2,'3795'],[8,2,'3034'],[10,2,'3832'],[12,2,'2445'],[16,2,'4282'],
+  [3,3,'11212'],[4,4,'3031'],[6,4,'3032'],[8,4,'3035'],[10,4,'3030'],[12,4,'3029'],
+  [6,6,'3958'],[8,6,'3036'],[10,6,'3033'],[12,6,'3028'],[8,8,'41539'],
+]) add({ id:`p${w}x${d}`, w, d, p:1, part, family:'plate', label:`${d}x${w} plate` });
+
+// tiles have no studs at all, which the grid has to know about
+for (const [w, d, part] of [
+  [1,1,'3070'],[2,1,'3069'],[3,1,'63864'],[4,1,'2431'],[6,1,'6636'],[8,1,'4162'],
+  [2,2,'3068'],[3,2,'26603'],[4,2,'87079'],[6,2,'69729'],[4,4,'1751'],[6,6,'10202'],
+]) add({ id:`f${w}x${d}`, w, d, p:1, part, tile:true, family:'tile', label:`${d}x${w} tile` });
+
+for (const o of [
+  { id:'s3040',  w:2, d:1, p:3, run:1, part:'3040',  label:'slope 45 2x1' },
+  { id:'s3039',  w:2, d:2, p:3, run:1, part:'3039',  label:'slope 45 2x2' },
+  { id:'s3038',  w:3, d:2, p:3, run:1, part:'3038',  label:'slope 45 2x3' },
+  { id:'s3037',  w:4, d:2, p:3, run:1, part:'3037',  label:'slope 45 2x4' },
+  { id:'s4445',  w:8, d:2, p:3, run:1, part:'4445',  label:'slope 45 2x8' },
+  { id:'s4286',  w:3, d:1, p:3, run:2, part:'4286',  label:'slope 33 3x1' },
+  { id:'s3298',  w:3, d:2, p:3, run:2, part:'3298',  label:'slope 33 3x2' },
+  { id:'s4161',  w:3, d:3, p:3, run:2, part:'4161',  label:'slope 33 3x3' },
+  { id:'s3299',  w:4, d:3, p:3, run:2, part:'3299',  label:'slope 33 3x4' },
+  { id:'s54200', w:1, d:1, p:2, run:1, part:'54200', label:'cheese slope' },
+  { id:'s85984', w:2, d:1, p:2, run:1, part:'85984', label:'slope 30 1x2' },
+  { id:'s60481', w:2, d:1, p:6, run:1, part:'60481', label:'slope 65 2x1x2' },
+  { id:'s4460',  w:2, d:1, p:9, run:1, part:'4460',  label:'slope 75 2x1x3' },
+]) add({ ...o, shape:'slope', family:'slope' });
+
+for (const o of [
+  { id:'i3665', w:2, d:1, p:3, run:1, part:'3665', label:'inverted 45 2x1' },
+  { id:'i3660', w:2, d:2, p:3, run:1, part:'3660', label:'inverted 45 2x2' },
+  { id:'i4871', w:4, d:2, p:3, run:1, part:'4871', label:'inverted 45 2x4' },
+  { id:'i4287', w:3, d:1, p:3, run:2, part:'4287', label:'inverted 33 3x1' },
+  { id:'i3747', w:3, d:2, p:3, run:2, part:'3747', label:'inverted 33 3x2' },
+]) add({ ...o, shape:'invslope', family:'slope' });
+
+for (const o of [
+  { id:'c11477', w:2, d:1, p:3, flat:1, part:'11477', label:'curve 2x1' },
+  { id:'c50950', w:3, d:1, p:3, flat:1, part:'50950', label:'curve 3x1' },
+  { id:'c61678', w:4, d:1, p:3, flat:1, part:'61678', label:'curve 4x1' },
+  { id:'c42022', w:6, d:1, p:3, flat:1, part:'42022', label:'curve 6x1' },
+  { id:'c15068', w:2, d:2, p:3, flat:1, part:'15068', label:'curve 2x2' },
+  { id:'c93606', w:4, d:2, p:3, flat:1, part:'93606', label:'curve 4x2' },
+  { id:'c6091',  w:2, d:1, p:4, flat:0, part:'6091',  label:'curved top 2x1' },
+  { id:'c24309', w:2, d:1, p:3, flat:0, part:'24309', label:'curve 2x1 inverted' },
+  { id:'c33243', w:3, d:1, p:3, flat:0, part:'33243', label:'curve 3x1 inverted' },
+]) add({ ...o, shape:'curve', family:'curve' });
+
+// arches: solid top, legs at each end, open beneath
+for (const o of [
+  { id:'a4490', w:3, d:1, p:3, part:'4490', label:'arch 1x3' },
+  { id:'a3659', w:4, d:1, p:3, part:'3659', label:'arch 1x4' },
+  { id:'a3455', w:6, d:1, p:3, part:'3455', label:'arch 1x6' },
+]) add({ ...o, shape:'arch', family:'arch' });
+
+for (const o of [
+  { id:'k4589', w:1, d:1, p:2, part:'4589', label:'cone 1x1' },
+  { id:'k3942', w:2, d:2, p:6, part:'3942', label:'cone 2x2x2' },
+]) add({ ...o, shape:'cone', family:'round' });
+
+// domes are smooth on top: nothing sits on one
+for (const o of [
+  { id:'d553',   w:2, d:2, p:3, part:'553',   label:'dome 2x2' },
+  { id:'d30367', w:2, d:2, p:5, part:'30367', label:'dome 2x2 tall' },
+]) add({ ...o, shape:'dome', family:'round', tile:true });
+
+for (const [w, d, part] of [[14,2,'91988'],[16,6,'3027']])
+  add({ id:`p${w}x${d}`, w, d, p:1, part, family:'plate', label:`${d}x${w} plate` });
+
+for (const o of [
+  { id:'r3062',  w:1, d:1, p:3, part:'3062',  label:'round brick 1x1' },
+  { id:'r3941',  w:2, d:2, p:3, part:'3941',  label:'round brick 2x2' },
+  { id:'r6141',  w:1, d:1, p:1, part:'6141',  label:'round plate 1x1' },
+  { id:'r4032',  w:2, d:2, p:1, part:'4032',  label:'round plate 2x2' },
+  { id:'r60474', w:4, d:4, p:1, part:'60474', label:'round plate 4x4' },
+  { id:'r11213', w:6, d:6, p:1, part:'11213', label:'round plate 6x6' },
+  { id:'r98138', w:1, d:1, p:1, part:'98138', tile:true, label:'round tile 1x1' },
+  { id:'r4150',  w:2, d:2, p:1, part:'4150',  tile:true, label:'round tile 2x2' },
+  { id:'r67095', w:3, d:3, p:1, part:'67095', tile:true, label:'round tile 3x3' },
+  { id:'r6177',  w:4, d:4, p:1, part:'6177',  tile:true, label:'round tile 4x4' },
+]) add({ ...o, shape:'round', family:'round' });
+
+const label = b => b.label;
 
 /* =========================== scene =========================== */
 const canvas   = document.getElementById('gl');
@@ -171,6 +224,7 @@ scene.fog = new THREE.Fog(SKY, 62, 108);
 
 const camera = new THREE.PerspectiveCamera(38, 1, 0.5, 200);
 const TARGET = new THREE.Vector3(0, 1.2, 0);
+const aim = new THREE.Vector3();          // TARGET plus however far it has been slid
 
 /* The ground half of the hemisphere light is the big change: it was a dark
    slate standing in for an unlit room, and it's what made every downward face
@@ -443,8 +497,24 @@ function shapeGeo(def) {
     g.translate(0, h / 2, 0);
     return g;
   }
+  if (def.shape === 'cone') {
+    const g = new THREE.CylinderGeometry(w * 0.31, w / 2, h, 20);
+    g.translate(0, h / 2, 0);
+    return g;
+  }
+  if (def.shape === 'dome') {                   // upper hemisphere, squashed to height
+    const g = new THREE.SphereGeometry(w / 2, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+    g.scale(1, h / (w / 2), 1);
+    return g;
+  }
   const s = new THREE.Shape();
-  if (def.shape === 'slope') {                  // high at +x, falling to nothing
+  if (def.shape === 'arch') {                   // solid top, a leg at each end
+    const leg = 1;
+    s.moveTo(0, 0); s.lineTo(0, h); s.lineTo(w, h); s.lineTo(w, 0);
+    s.lineTo(w - leg, 0);
+    s.quadraticCurveTo(w / 2, h * 0.92, leg, 0);
+    s.lineTo(0, 0);
+  } else if (def.shape === 'slope') {                  // high at +x, falling to nothing
     s.moveTo(0, 0); s.lineTo(w, 0); s.lineTo(w, h);
     s.lineTo(w - def.run, h); s.lineTo(0, 0);
   } else if (def.shape === 'invslope') {        // the same wedge, turned over
@@ -467,9 +537,9 @@ const geoFor = def => {
    exactly where another piece may later rest. A tile has none anywhere. */
 function studAt(def, i) {
   if (def.tile) return false;
-  if (def.shape === 'slope') return i >= def.w - def.run;
-  if (def.shape === 'curve') return i >= def.w - (def.flat ?? 1);
-  return true;                                  // plain, inverted and round: all of it
+  if (def.shape === 'slope') return def.w > def.run && i >= def.w - def.run;
+  if (def.shape === 'curve') return def.w > (def.flat ?? 1) && i >= def.w - (def.flat ?? 1);
+  return true;   // plain, inverted, arch, cone and round: studs the whole way across
 }
 
 /* The lump as one object: each part where it sits relative to the lump's centre,
@@ -685,7 +755,9 @@ function detach(rec, defer) {
 }
 
 /* =========================== camera rig =========================== */
-const view = { az: -0.7, pol: 0.92, rad: 34, taz: -0.7, tpol: 0.92, trad: 34 };
+const view = { az: -0.7, pol: 0.92, rad: 34, taz: -0.7, tpol: 0.92, trad: 34,
+               px: 0, pz: 0, tpx: 0, tpz: 0 };     // and where it has been slid to
+const PAN_MAX = 26;                                 // far enough to work a corner
 const HOME = { az: -0.7, pol: 0.92, rad: 34 };
 const POL_MIN = 0.30, POL_MAX = 1.40;            // ~17° (top-down-ish) .. ~80° (near horizon)
 const RAD_MIN = 12,  RAD_MAX = 56;
@@ -709,13 +781,18 @@ function applyCamera() {
   view.az  += (view.taz  - view.az)  * 0.2;
   view.pol += (view.tpol - view.pol) * 0.2;
   view.rad += (view.trad - view.rad) * 0.2;
+  view.px  += (view.tpx  - view.px)  * 0.2;
+  view.pz  += (view.tpz  - view.pz)  * 0.2;
+  // The look-at point slides with the pan, so the board moves across the screen
+  // rather than the camera swinging and changing the angle you see it from.
+  aim.set(TARGET.x + view.px, TARGET.y, TARGET.z + view.pz);
   const s = Math.sin(view.pol);
   camera.position.set(
-    TARGET.x + view.rad * s * Math.sin(view.az),
-    TARGET.y + view.rad * Math.cos(view.pol),
-    TARGET.z + view.rad * s * Math.cos(view.az)
+    aim.x + view.rad * s * Math.sin(view.az),
+    aim.y + view.rad * Math.cos(view.pol),
+    aim.z + view.rad * s * Math.cos(view.az)
   );
-  camera.lookAt(TARGET);
+  camera.lookAt(aim);
   camera.updateMatrixWorld();   // keep raycasts in sync with the damped camera
   placeLights();                // ...and the lamp with it
 }
@@ -757,6 +834,13 @@ function moveNav(e) {
     const mx   = (a.x + b.x) / 2;
     view.trad = clamp(pinch.rad * (pinch.dist / Math.max(dist, 1)), RAD_MIN, RAD_MAX);
     view.taz  = pinch.az - (mx - pinch.mx) * 0.004;
+    // ...and slide it about, in the plane of the board as it appears on screen,
+    // so pushing right pushes it right whichever way round it has been spun.
+    const my = (a.y + b.y) / 2;
+    const k  = view.trad * 0.0016;
+    const dx = (mx - pinch.mx) * k, dy = (my - pinch.my) * k;
+    view.tpx = clamp(pinch.px - (dx * Math.cos(view.az) - dy * Math.sin(view.az)), -PAN_MAX, PAN_MAX);
+    view.tpz = clamp(pinch.pz + (dx * Math.sin(view.az) + dy * Math.cos(view.az)), -PAN_MAX, PAN_MAX);
   }
 }
 function endNav(e) {
@@ -766,7 +850,9 @@ function endNav(e) {
 }
 function startPinch() {
   const [a, b] = [...nav.values()];
-  pinch = { dist: Math.max(Math.hypot(a.x - b.x, a.y - b.y), 1), rad: view.trad, mx: (a.x + b.x) / 2, az: view.taz };
+  pinch = { dist: Math.max(Math.hypot(a.x - b.x, a.y - b.y), 1), rad: view.trad,
+            mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, az: view.taz,
+            px: view.tpx, pz: view.tpz };
 }
 
 
@@ -1371,19 +1457,57 @@ document.addEventListener('visibilitychange', () => {
 
 /* =========================== menu =========================== */
 const paletteEl = document.getElementById('palette');
-const pageStateEl = document.getElementById('pageState');
-let page = 0;
+const TRAY_SLOTS = 12;
+let trayParts = [], trayColours = [], tray = null;
 
-/* The tray shows one page at a time; the catalogue behind it is always whole,
-   so Gemini's piece indices stay valid whichever page happens to be open. */
+const shuffled = a => { const b = [...a];
+  for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));
+    [b[i], b[j]] = [b[j], b[i]]; }
+  return b; };
+
+/* A dozen out of a hundred-odd, but stratified: one guaranteed from each family
+   before the rest are filled at random, so a shuffle never comes back as twelve
+   plates. */
+function pickParts(n) {
+  const families = [...new Set(CATALOG.map(d => d.family))];
+  const out = [];
+  for (const f of shuffled(families)) out.push(shuffled(CATALOG.filter(d => d.family === f))[0]);
+  for (const d of shuffled(CATALOG)) {
+    if (out.length >= n) break;
+    if (!out.includes(d)) out.push(d);
+  }
+  return shuffled(out).slice(0, n);
+}
+/* A dozen different colours, not a dozen of the same three. */
+const pickColours = n => {
+  const pool = shuffled(LEGO.map(([, h]) => h)).slice(0, Math.max(n, 12));
+  return Array.from({ length: n }, (_, i) => pool[i % pool.length]);
+};
+
+/* Gemini's palette themes the tray; without one it is simply varied. Either way
+   the colours are shuffled across the slots, so the same shade is not always in
+   the same corner. Nothing in the catalogue is mutated — a piece dragged out
+   carries a copy with the colour of the moment baked in, so anything already on
+   the board keeps the colour it was built in. */
+function paintTray(palette) {
+  tray = palette || null;
+  const pool = palette && palette.length ? palette : pickColours(TRAY_SLOTS);
+  trayColours = shuffled(Array.from({ length: TRAY_SLOTS }, (_, i) => pool[i % pool.length]));
+}
+function scramble() {
+  trayParts = pickParts(TRAY_SLOTS);
+  paintTray(tray);
+  renderPalette(true);
+}
+
 function renderPalette(flash) {
   paletteEl.replaceChildren();
-  PAGES[page].forEach((def, idx) => {
+  trayParts.forEach((def, idx) => {
     const el = document.createElement('div');
     el.className = 'brick' + (idx === 0 ? ' active' : '');
     const sw = document.createElement('div');
     sw.className = 'swatch' + (def.shape ? ' ' + def.shape : '');
-    sw.style.background = colourOf(def);
+    sw.style.background = trayColours[idx] || def.c;
     sw.style.gridTemplateColumns = `repeat(${def.w}, var(--stud))`;
     for (let n = 0; n < def.w * def.d; n++) sw.appendChild(document.createElement('i'));
     const lb = document.createElement('div');
@@ -1404,16 +1528,15 @@ function renderPalette(flash) {
       selected = idx;
       [...paletteEl.children].forEach((c, i) => c.classList.toggle('active', i === idx));
       // a copy, so the colour it leaves the tray with is the colour it keeps
-      beginDrag(e, { ...def, c: colourOf(def) }, el);
+      beginDrag(e, { ...def, c: trayColours[idx] || def.c }, el);
     });
   });
-  pageStateEl.textContent = `${PAGE_NAMES[page]} ${page + 1}/${PAGES.length}`;
 }
 
 const tap = (id, fn) => document.getElementById(id)
   .addEventListener('pointerdown', e => { e.preventDefault(); fn(); });
-renderPalette();
-tap('btnPage', () => { page = (page + 1) % PAGES.length; renderPalette(); });
+scramble();
+tap('btnPage', scramble);
 /* No button for this any more — throwing earned its place. F still toggles it,
    for when a flick needs ruling out while chasing something else.           */
 const toggleFlick = () => { flickOn = !flickOn; };
@@ -1423,9 +1546,12 @@ tap('btnClear', () => {
   chat.length = 0;                       // new build, new conversation
   lastTally = null;
   subject = null; asked = false; rejected = [];
-  tray = null; renderPalette();          // ...and the tray back to its own colours
+  tray = null; scramble();               // ...and a fresh handful of pieces
 });
-tap('btnHome', () => { view.taz = HOME.az; view.tpol = HOME.pol; view.trad = HOME.rad; });
+tap('btnHome', () => {
+  view.taz = HOME.az; view.tpol = HOME.pol; view.trad = HOME.rad;
+  view.tpx = 0; view.tpz = 0;             // and back to the middle of the table
+});
 tap('btnFull', () => {
   if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
   else document.exitFullscreen?.();
@@ -1463,6 +1589,22 @@ const FAMILIES = 'r red  o orange  y yellow  l lime  g green  a azure  b blue\n'
    from above. A list of pieces describes the parts; this describes the picture,
    which is what is being asked about. Overhangs resolve to whatever is on top,
    exactly as an eye would see them. */
+/* Which way the board is facing from where the person is sitting, in quarter
+   turns from the home view. Without this the map is in fixed world axes: spin
+   the board a quarter turn and Gemini's "left" stops being your left, so it
+   reads the picture rotated and says something that makes no sense from your
+   side of the screen. */
+const viewTurns = () =>
+  (((Math.round((view.az - HOME.az) / (Math.PI / 2)) % 4) + 4) % 4);
+/* Output cell -> source cell, for q quarter turns. */
+function fromView(x, y, q) {
+  const N = GRID - 1;
+  return q === 1 ? [y, N - x]
+       : q === 2 ? [N - x, N - y]
+       : q === 3 ? [N - y, x]
+       :           [x, y];
+}
+
 function topDown() {
   const colour = new Array(GRID * GRID).fill(null);
   const top = new Int16Array(GRID * GRID);
@@ -1477,11 +1619,13 @@ function topDown() {
   const pad = v => String(v).padStart(2, ' ');
   const head = '    0123456789...   x ->';
   const paint = [head], relief = [head];
+  const q = viewTurns();
   let tallest = 0;
   for (let j = 0; j < GRID; j++) {
     let cells = '', highs = '';
     for (let i = 0; i < GRID; i++) {
-      const n = j * GRID + i;
+      const [si, sj] = fromView(i, j, q);
+      const n = sj * GRID + si;
       cells += colour[n] ? CODE[colour[n]] : '.';
       highs += top[n] ? (top[n] > 9 ? '+' : String(top[n])) : '.';
       tallest = Math.max(tallest, top[n]);
@@ -1498,8 +1642,9 @@ function topDown() {
    list — they are what let it reason about shape instead of parts. */
 function sceneSummary(withTray) {
   const out = [];
-  out.push(`BOARD: ${GRID}x${GRID} studs, seen from directly above. x runs 0-${GRID - 1} ` +
-           `left to right, z runs 0-${GRID - 1} top to bottom of the map below.`);
+  out.push(`BOARD: ${GRID}x${GRID} studs, drawn from where the person is sitting — ` +
+           `left on this map is their left. x runs 0-${GRID - 1} left to right, ` +
+           `z runs 0-${GRID - 1} near to far.`);
   out.push('');
   const { paint, relief, tallest } = topDown();
   out.push('THE PICTURE, straight down. One character per stud, "." is bare board.');
@@ -1516,16 +1661,9 @@ function sceneSummary(withTray) {
   }
   out.push('');
   if (!placed.length) out.push('The board is empty - nothing drawn yet.');
-  if (withTray) {
-    // Extents are written as x3z1 rather than "1x3". A bare "1x3" gets read as
-    // width-by-depth, which is the transpose of the truth, and every piece then
-    // gets planned lying the wrong way round.
-    out.push('TRAY. index=colour then x<studs along x>z<studs along z>:');
-    const kind = d => d.shape === 'invslope' ? '-inv' : d.shape ? '-' + d.shape
-                    : d.p === 1 ? '-flat' : '';
-      out.push(CATALOG.map((d, i) =>
-      `${i}=${CODE[COLOUR_NAME[colourOf(d)]]}x${d.w}z${d.d}${kind(d)}`).join('  '));
-  }
+  // Only what is actually in front of them — the library behind it runs past a
+  // hundred pieces and none of the rest is on the table right now.
+  if (withTray) out.push('IN THE TRAY: ' + trayParts.map(d => d.label).join(', '));
   return out.join('\n');
 }
 
@@ -1775,7 +1913,7 @@ function sayIdea(suggests, palette) {
   if (!suggests) return;
   sparkle();
   bubble(suggests, 'suggests', SUGGEST_HOLD);
-  if (palette) { tray = palette; renderPalette(true); }
+  if (palette) { paintTray(palette); renderPalette(true); }
 }
 
 /* ---------- the two asks ---------- */
@@ -1964,4 +2102,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayIdea, askWhich, chat, sinceLast, get subject(){ return subject; }, get asked(){ return asked; }, get rejected(){ return rejected; }, toPalette, widenPalette, colourOf, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayIdea, askWhich, chat, sinceLast, get subject(){ return subject; }, get asked(){ return asked; }, get rejected(){ return rejected; }, toPalette, widenPalette, scramble, pickParts, get trayParts(){ return trayParts; }, get trayColours(){ return trayColours; }, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
