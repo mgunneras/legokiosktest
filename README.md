@@ -173,6 +173,15 @@ Keyboard: `R` rotate, `Z` undo.
   only one lifting path and no second case to keep in step. It is a hold rather
   than a tap so it can't fight the orbit: the hold is abandoned the moment the
   finger travels more than `HOLD_SLOP`.
+- **A lifted piece keeps the point you grabbed it by.** The press records where
+  on the piece the finger landed, measured against the lump's centre *before* it
+  comes apart, and that offset is held for the rest of the drag — so a brick
+  taken by its corner stays hung by its corner instead of snapping to be carried
+  by its middle. The offset is stored in the piece's own frame, so it swings
+  round as the piece turns; the ghost uses the snapped angle and the held piece
+  the animated one, so the landing spot stays still while your hand is still
+  turning. Pieces pulled from the tray have a zero offset and are carried
+  centred, exactly as before.
 - **Setting a lump down is the interesting bit.** It is not enough that the
   bottom piece mates — a piece high in the lump can run into something standing
   beside where it is going. So `solveAsm()` lowers the whole thing until *any*

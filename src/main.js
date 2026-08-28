@@ -688,7 +688,7 @@ stageEl.addEventListener('pointerdown', e => {
   try { stageEl.setPointerCapture(e.pointerId); } catch {}
   if (castFrom(e.clientX, e.clientY)) {           // did it land on a brick?
     const hit = ray.intersectObjects(pickList, false)[0];
-    if (hit && hit.object.userData.owner) startHold(e, hit.object.userData.owner);
+    if (hit && hit.object.userData.owner) startHold(e, hit.object.userData.owner, hit.point);
   }
   nav.set(e.pointerId, { x:e.clientX, y:e.clientY });
   if (nav.size === 2) startPinch();
@@ -773,19 +773,20 @@ function solveAt(px, pz, def, rot) {
   return { i0, j0, w, d, h, ok };
 }
 /* ...and where does the brick under `ray` land? null if it misses the build */
-function solveRay(def, rot) {
+function solveRay(def, rot, gx = 0, gz = 0) {
   const hit = ray.intersectObjects(hitList, false)[0];
   if (!hit) return null;
-  // nudge into the column we actually hit (side faces sit exactly on a seam)
-  return solveAt(hit.point.x - hit.face.normal.x * 0.02,
-                 hit.point.z - hit.face.normal.z * 0.02, def, rot);
+  // nudge into the column we actually hit (side faces sit exactly on a seam),
+  // then back off by the grab so the piece lands where the finger is holding it
+  return solveAt(hit.point.x - hit.face.normal.x * 0.02 - gx,
+                 hit.point.z - hit.face.normal.z * 0.02 - gz, def, rot);
 }
 const solve = (x, y, def, rot) => castFrom(x, y) ? solveRay(def, rot) : null;
-function solveRayAsm(asm, R) {
+function solveRayAsm(asm, R, gx = 0, gz = 0) {
   const hit = ray.intersectObjects(hitList, false)[0];
   if (!hit) return null;
-  return solveAsm(hit.point.x - hit.face.normal.x * 0.02,
-                  hit.point.z - hit.face.normal.z * 0.02, asm, R);
+  return solveAsm(hit.point.x - hit.face.normal.x * 0.02 - gx,
+                  hit.point.z - hit.face.normal.z * 0.02 - gz, asm, R);
 }
 const overBoard = p => Math.abs(p.x) <= GRID / 2 && Math.abs(p.z) <= GRID / 2;
 
@@ -798,7 +799,7 @@ const placeX = (i0, w) => i0 - GRID / 2 + w / 2;
 const holds = new Map();        // pointerId -> { rec, line, t0, x0, y0, x, y, blocked }
 let lastTap = { rec: null, t: 0 };
 
-function startHold(e, rec) {
+function startHold(e, rec, hitPoint) {
   const blocked = false;        // anything can be lifted now, lump and all
   const span = rec.g.userData.span;
   // Depth-tested on purpose: drawing through the brick reads as an x-ray cage
@@ -812,7 +813,7 @@ function startHold(e, rec) {
   line.position.y = span.y / 2;
   line.renderOrder = 2;
   rec.g.add(line);
-  holds.set(e.pointerId, { rec, blocked, line, t0: performance.now(),
+  holds.set(e.pointerId, { rec, blocked, line, t0: performance.now(), hit: hitPoint.clone(),
                            x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY });
 }
 function cancelHold(pid) {
@@ -839,18 +840,25 @@ function liftBrick(pid, h) {
   pluckSound(true);
   if (rec.kind === 'loose') {                     // a desk piece is only ever itself
     const def = rec.def;
+    const grab = h.hit && { x: h.hit.x - rec.g.position.x, z: h.hit.z - rec.g.position.z };
     detach(rec);
-    beginDrag({ pointerId: pid, clientX: h.x, clientY: h.y }, def, null, undefined);
+    beginDrag({ pointerId: pid, clientX: h.x, clientY: h.y }, def, null, undefined, null, grab);
     return;
   }
   // Take the whole lump. A single brick is just a lump of one, so this is the
   // only lifting path off the board and there is no second case to keep in step.
   const members = assemblyOf(rec);
   const asm = toLocal(members);
+  // Measure the grab against the lump's centre *before* it comes apart, so the
+  // piece stays under the finger where it was taken hold of rather than jumping
+  // to be held by its middle.
+  let i0 = GRID, j0 = GRID;
+  for (const m of members) { i0 = Math.min(i0, m.sol.i0); j0 = Math.min(j0, m.sol.j0); }
+  const grab = h.hit && { x: h.hit.x - placeX(i0, asm.W), z: h.hit.z - placeX(j0, asm.D) };
   for (const m of members) detach(m, true);
   rebuildHeights();
   // The lump comes up in the orientation it was sitting in, so it starts unturned.
-  beginDrag({ pointerId: pid, clientX: h.x, clientY: h.y }, rec.def, null, 0, asm);
+  beginDrag({ pointerId: pid, clientX: h.x, clientY: h.y }, rec.def, null, 0, asm, grab);
 }
 /* A press that neither travelled nor lasted is a tap; two of them chuck it. */
 function tapHold(e) {
@@ -894,7 +902,7 @@ function gridTurns(s) {
 }
 const gridRot = s => gridTurns(s) & 1;
 
-function beginDrag(e, def, srcEl, seedRot, asm) {
+function beginDrag(e, def, srcEl, seedRot, asm, grab) {
   // A pointer id gets reused — a mouse is always id 1 — so a session that was
   // somehow left open would be overwritten here and orphan its tile and brick
   // in the scene with nothing left holding a reference to them.
@@ -914,6 +922,9 @@ function beginDrag(e, def, srcEl, seedRot, asm) {
   const s = { def, tile, src:srcEl, x:e.clientX, y:e.clientY, az0:view.az,
               rot0: seedRot === undefined ? screenParity(def) : ((seedRot - manualRot) & 1),
               asm, held:null, ghost:null, rot:-1, sol:null, yaw:0, yawTo:0,
+              // where on the piece the finger actually took hold, in the piece's
+              // own unrotated frame. Zero for anything pulled from the tray.
+              gx: grab ? grab.x : 0, gz: grab ? grab.z : 0,
               vel:new THREE.Vector3(), lastPos:new THREE.Vector3(), lastT:0 };
   drags.set(e.pointerId, s);
   refreshDrag(s);
@@ -956,7 +967,13 @@ function refreshDrag(s) {
     s.rot = rot;
   }
 
-  const sol = over ? (s.asm ? solveRayAsm(s.asm, rot) : solveRay(s.def, rot)) : null;
+  // The grab point is fixed to the piece, so it swings round as the piece turns.
+  // The ghost uses the snapped angle and the held piece the animated one, so the
+  // landing spot stays still while the thing in your hand is still turning.
+  const snap = rot * (Math.PI / 2);
+  const gx = s.gx * Math.cos(snap) + s.gz * Math.sin(snap);
+  const gz = -s.gx * Math.sin(snap) + s.gz * Math.cos(snap);
+  const sol = over ? (s.asm ? solveRayAsm(s.asm, rot, gx, gz) : solveRay(s.def, rot, gx, gz)) : null;
   s.sol = sol;
 
   s.held.visible = over;
@@ -968,7 +985,9 @@ function refreshDrag(s) {
       // sit just above the fingertip, so the finger and the brick don't hide
       // the landing ghost directly beneath them on the same screen ray
       camUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
-      s.held.position.set(tmpV.x, y - hh / 2, tmpV.z).addScaledVector(camUp, LIFT);
+      const hx = s.gx * Math.cos(s.yaw) + s.gz * Math.sin(s.yaw);
+      const hz = -s.gx * Math.sin(s.yaw) + s.gz * Math.cos(s.yaw);
+      s.held.position.set(tmpV.x - hx, y - hh / 2, tmpV.z - hz).addScaledVector(camUp, LIFT);
     }
     // Velocity comes off the brick's own world position, not the screen, so a
     // throw already accounts for the camera. Smoothed, and refreshDrag runs
