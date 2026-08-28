@@ -696,14 +696,21 @@ const H = (i, j) => heights[j * GRID + i];
 const setH = (i, j, v) => { heights[j * GRID + i] = v; };
 const canMate = (i, j) => matable[j * GRID + i] === 1;
 
+/* One quarter turn of a cell grid, applied as many times as needed. Doing it by
+   repetition rather than by four hand-written formulae means the piece and the
+   lump can never disagree about which way round a turn goes. */
+function cellTurn(li, lj, W, D, R) {
+  let i = li, j = lj, w = W, d = D;
+  for (let n = 0; n < (R & 3); n++) { const ni = j; j = w - 1 - i; i = ni; const t = w; w = d; d = t; }
+  return [i, j];
+}
 /* Write a piece into both maps. Rotation is a real quarter turn of the piece,
-   not a swap of its width and depth — for a wedge those are different solids —
-   so the piece's own column `li` lands at a different world column each way. */
+   not a swap of its width and depth — for a wedge those are different solids. */
 function stamp(def, sol, rot, top) {
   for (let li = 0; li < def.w; li++)
     for (let lj = 0; lj < def.d; lj++) {
-      const wi = rot ? sol.i0 + lj : sol.i0 + li;
-      const wj = rot ? sol.j0 + (def.w - 1 - li) : sol.j0 + lj;
+      const [oi, oj] = cellTurn(li, lj, def.w, def.d, rot);
+      const wi = sol.i0 + oi, wj = sol.j0 + oj;
       setH(wi, wj, top);
       matable[wj * GRID + wi] = studAt(def, li, lj) ? 1 : 0;
     }
@@ -757,11 +764,13 @@ function toLocal(members) {
 }
 /* A quarter turn of the whole lump about its own centre. Each part turns with
    it and lands at a different corner — the same mapping a single piece uses. */
+const turnOnce = a => ({ W: a.D, D: a.W, H: a.H,
+  parts: a.parts.map(p => ({ def:p.def, rot:(p.rot + 1) & 3, dh:p.dh,
+    di:p.dj, dj:a.W - p.di - p.fw, fw:p.fd, fd:p.fw })) });
 function turnAsm(asm, R) {
-  if (!R) return asm;
-  return { W: asm.D, D: asm.W, H: asm.H,
-    parts: asm.parts.map(p => ({ def:p.def, rot:p.rot ^ 1, dh:p.dh,
-      di:p.dj, dj:asm.W - p.di - p.fw, fw:p.fd, fd:p.fw })) };
+  let a = asm;
+  for (let n = 0; n < (R & 3); n++) a = turnOnce(a);
+  return a;
 }
 
 /* Where does a whole lump come to rest, and may it? Three things have to hold,
@@ -928,8 +937,8 @@ function castFrom(clientX, clientY) {
 /* where does a footprint centred on this point land? `build` has no x/z offset,
    so world and board coordinates agree on the two axes that matter here.     */
 function solveAt(px, pz, def, rot) {
-  const w = rot ? def.d : def.w;
-  const d = rot ? def.w : def.d;
+  const w = (rot & 1) ? def.d : def.w;
+  const d = (rot & 1) ? def.w : def.d;
   const i0 = clamp(Math.round(px + GRID / 2 - w / 2), 0, GRID - w);
   const j0 = clamp(Math.round(pz + GRID / 2 - d / 2), 0, GRID - d);
 
@@ -1083,7 +1092,10 @@ function screenParity(def) {
 function gridTurns(s) {
   return s.rot0 + manualRot + Math.round((view.az - s.az0) / (Math.PI / 2));
 }
-const gridRot = s => gridTurns(s) & 1;
+/* Four, not two. Parity is enough for a rectangle, where a half turn looks the
+   same as none — but a slope, a wedge or a rounded corner faces a direction,
+   and two of its four headings were simply unreachable. */
+const gridRot = s => gridTurns(s) & 3;
 
 function beginDrag(e, def, srcEl, seedRot, asm, grab) {
   // A pointer id gets reused — a mouse is always id 1 — so a session that was
@@ -1103,7 +1115,7 @@ function beginDrag(e, def, srcEl, seedRot, asm, grab) {
   // grid as the plate spins under it, so the pickup orientation moves with the
   // camera without disturbing that.
   const s = { def, tile, src:srcEl, x:e.clientX, y:e.clientY, az0:view.az,
-              rot0: seedRot === undefined ? screenParity(def) : ((seedRot - manualRot) & 1),
+              rot0: seedRot === undefined ? screenParity(def) : ((seedRot - manualRot) & 3),
               asm, held:null, ghost:null, rot:-1, sol:null, yaw:0, yawTo:0,
               // where on the piece the finger actually took hold, in the piece's
               // own unrotated frame. Zero for anything pulled from the tray.
@@ -1132,23 +1144,16 @@ function refreshDrag(s) {
     s.held = s.asm ? buildAssembly(s.asm) : buildBrick(s.def);
     scene.add(s.held);
     s.yaw = turns * (Math.PI / 2);
-    if (s.asm) { s.ghost = buildAssembly(s.asm, true); build.add(s.ghost); }
+    if (s.asm) { s.ghost = buildAssembly(s.asm, true); build.add(s.ghost); }   // lump ghost
   }
   // The hand twists; it doesn't teleport. The ghost still snaps, because it is
   // answering "where does this land", not "what is my hand doing".
   s.yawTo = turns * (Math.PI / 2);
   s.yaw += (s.yawTo - s.yaw) * 0.32;
   s.held.rotation.y = s.yaw;
-  if (s.asm) {
-    s.ghost.rotation.y = rot * (Math.PI / 2);       // a lump only ever turns
-    s.rot = rot;
-  } else if (rot !== s.rot) {                       // snapped to the other grid axis
-    if (s.ghost) build.remove(s.ghost);
-    s.ghost = buildBrick(s.def, true);
-    s.ghost.rotation.y = rot * (Math.PI / 2);
-    build.add(s.ghost);                             // sticks to the board, bounce and all
-    s.rot = rot;
-  }
+  if (!s.ghost) { s.ghost = buildBrick(s.def, true); build.add(s.ghost); }
+  s.ghost.rotation.y = rot * (Math.PI / 2);         // built once, only ever turned
+  s.rot = rot;
 
   // The grab point is fixed to the piece, so it swings round as the piece turns.
   // The ghost uses the snapped angle and the held piece the animated one, so the
@@ -1609,7 +1614,7 @@ tap('btnFull', () => {
 addEventListener('keydown', e => {
   // No button for this any more: spinning the plate turns the brick and is the
   // more discoverable of the two. R stays as a fallback on a fixed view.
-  if (e.key === 'r' || e.key === 'R') manualRot ^= 1;
+  if (e.key === 'r' || e.key === 'R') manualRot = (manualRot + 1) & 3;
   if (e.key === 'z' || e.key === 'Z') undo();
   if (e.key === 'f' || e.key === 'F') toggleFlick();
 });

@@ -185,6 +185,13 @@ Keyboard: `R` rotate, `Z` undo.
   it would land on. `HOVER` and `LIFT` stack (the second pushes along the
   camera's up axis, not straight up), which at the original values put it over
   three brick heights away, floating rather than being held.
+- **Four headings, not two.** Rotation used to be stored as parity, which is
+  enough for a rectangle — a half turn of a 2x4 looks like no turn at all — but
+  a slope, a wedge or a rounded corner *faces* a direction, and two of its four
+  headings were simply unreachable. `gridRot()` is now `turns & 3`, footprints
+  swap on `rot & 1`, and the cell mapping is one quarter turn applied repeatedly
+  rather than four hand-written formulae, so a piece and a lump can never
+  disagree about which way round a turn goes.
 - **A 90° turn is a twist, not a swap.** `gridTurns()` accumulates signed
   quarter-turns instead of collapsing to parity, so the held brick is built once
   and rotated (~200ms) rather than rebuilt with its dimensions exchanged. The
