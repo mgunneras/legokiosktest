@@ -219,3 +219,32 @@ html,body{
 .brick.recolour{ animation:swatchFlip .42s ease both; }
 .swatch{ transition:background .3s ease; }
 @media (prefers-reduced-motion: reduce){ .brick.recolour{ animation:none; } }
+
+/* ---------- head tracking, in the debug panel ---------- */
+/* The panel has two halves now, and the second one can grow — so it scrolls
+   rather than running off the bottom of a laptop screen. */
+#debugPanel{ max-height:88vh; overflow-y:auto; }
+#debugPanel h3.sep{ margin-top:14px; padding-top:12px; border-top:1px solid var(--line); }
+#debugPanel h3 em{ font-style:normal; font-size:8px; letter-spacing:.14em; color:var(--dim); }
+.check{ display:flex; align-items:center; gap:7px; cursor:pointer; }
+/* the id-scoped rule above sets every input to full width; a tickbox is the
+   one thing in here that must stay its own size */
+#debugPanel .check input{ width:auto; flex:none; padding:0; margin:0; }
+/* The knob and its value live on one line so the readout sits where the thumb
+   is going — a slider you cannot read the number off is a guess. */
+.knob{ display:grid; gap:3px; }
+.knob label{ display:flex; justify-content:space-between; align-items:baseline; }
+.knob b{ font-weight:600; font-size:10px; color:var(--ink); font-variant-numeric:tabular-nums; }
+.knob input[type=range]{ width:100%; padding:0; height:16px; accent-color:var(--accent);
+  background:none; border:none; }
+/* Seeing what the camera sees is the whole debugging story: if the crosshair
+   isn't on your face, no amount of slider is going to help. */
+/* nothing to preview until the camera is running, and an empty grey box reads
+   as broken rather than as off */
+#headBox[hidden]{ display:none; }
+#headBox{ display:grid; gap:4px; justify-items:center; }
+#headView{ width:100%; max-width:200px; aspect-ratio:4/3; border-radius:7px;
+  background:var(--panel-2); border:1px solid var(--line); }
+#headOut{ font-size:10px; color:var(--dim); font-variant-numeric:tabular-nums;
+  letter-spacing:.04em; }
+#headNote{ font-size:10px; line-height:1.5; color:var(--dim); }

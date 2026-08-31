@@ -840,7 +840,11 @@ function detach(rec, defer) {
    `view.az`, which is now derived rather than driven: the camera sits at a
    fixed heading and the board turns, so the angle between them is one minus
    the other. Nothing downstream can tell the difference. */
-const view  = { pol: 0.92, rad: 34, tpol: 0.92, trad: 34, az: -0.7 };
+/* `bpol`/`brad` are where the hands parked the view; `tpol`/`trad` are where it
+   is actually being asked to go, once the head has leaned away from there. Two
+   layers rather than one, so a pinch still chooses the zoom and leaning in
+   still nudges it, instead of the two overwriting each other. */
+const view  = { pol: 0.92, rad: 34, tpol: 0.92, trad: 34, bpol: 0.92, brad: 34, az: -0.7 };
 const board = { yaw: 0, x: 0, z: 0, tyaw: 0, tx: 0, tz: 0 };
 const HOME  = { az: -0.7, pol: 0.92, rad: 34 };
 const POL_MIN = 0.30, POL_MAX = 1.40;            // ~17° (top-down-ish) .. ~80° (near horizon)
@@ -872,6 +876,8 @@ function applyBoard() {
 }
 
 function applyCamera() {
+  view.tpol = clamp(view.bpol + HEAD.tilt, POL_MIN, POL_MAX);
+  view.trad = clamp(view.brad * HEAD.push, RAD_MIN, RAD_MAX);
   view.pol  += (view.tpol  - view.pol)  * EASE;
   view.rad  += (view.trad  - view.rad)  * EASE;
   board.yaw += (board.tyaw - board.yaw) * EASE;
@@ -880,10 +886,14 @@ function applyCamera() {
   applyBoard();
   aim.copy(TARGET);
   const s = Math.sin(view.pol);
+  // Leaning sideways moves the seat, not the board: `view.az` stays the honest
+  // answer to "which way is the board facing me", so nothing downstream — the
+  // brick in your hand, the map Gemini reads — twitches as you shift about.
+  const az = HOME.az + HEAD.turn;
   camera.position.set(
-    TARGET.x + view.rad * s * Math.sin(HOME.az),
+    TARGET.x + view.rad * s * Math.sin(az),
     TARGET.y + view.rad * Math.cos(view.pol),
-    TARGET.z + view.rad * s * Math.cos(HOME.az)
+    TARGET.z + view.rad * s * Math.cos(az)
   );
   camera.lookAt(aim);
   camera.updateMatrixWorld();   // keep raycasts in sync with the damped camera
@@ -932,7 +942,7 @@ function regrab() {
     at: m.clone(),                          // ...and where it was last seen
     twist: gs.length === 2 ? Math.atan2(gs[1].z - gs[0].z, gs[1].x - gs[0].x) : 0,
     dist: gs.length === 2 ? Math.max(Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y), 1) : 1,
-    rad: view.trad,
+    rad: view.brad,
   };
 }
 
@@ -960,7 +970,7 @@ function moveNav(e) {
   if (!onDeck) {
     if (nav.size === 1) {
       board.tyaw += dx * 0.006;
-      view.tpol = clamp(view.tpol - dy * 0.006, POL_MIN, POL_MAX);
+      view.bpol = clamp(view.bpol - dy * 0.006, POL_MIN, POL_MAX);
     }
     return;
   }
@@ -982,7 +992,8 @@ function moveNav(e) {
     // Pinch reads in pixels, not in world units: measuring the spread on the
     // board it is currently scaling would chase its own tail.
     const d = Math.max(Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y), 1);
-    view.trad = view.rad = clamp(grip.rad * (grip.dist / d), RAD_MIN, RAD_MAX);
+    view.brad = clamp(grip.rad * (grip.dist / d), RAD_MIN, RAD_MAX);
+    view.rad  = clamp(view.brad * HEAD.push, RAD_MIN, RAD_MAX);
   } else {
     /* One finger is a shove, not a grip, so how much of it becomes spin is
        settled the way a real bench settles it: by where you pushed. r² over
@@ -1739,7 +1750,7 @@ tap('btnClear', () => {
   tray = null; scramble();               // ...and a fresh handful of pieces
 });
 tap('btnHome', () => {
-  view.tpol = HOME.pol; view.trad = HOME.rad;
+  view.bpol = HOME.pol; view.brad = HOME.rad;
   // square to the bench and back in the middle of it, keeping the build upright
   board.tyaw = Math.round(board.yaw / (Math.PI * 2)) * Math.PI * 2;
   board.tx = 0; board.tz = 0;
@@ -2219,6 +2230,229 @@ document.getElementById('debugPanel').addEventListener('submit', e => {
 });
 paintKeyBtn();
 
+/* ===================== the camera that watches back ===================== */
+/* Experimental, and off unless it is asked for. The idea is that tilt should
+   not be a gesture at all: nobody drags a bench to see more of its top, they
+   lean over it. So the front camera watches where your head is and the view
+   leans with it — up for a plan view, in for a closer look, sideways for a
+   little parallax.
+   No model and no library. This has to survive being flattened into one file
+   with nothing left to fetch, so the head is found the cheap way: chroma is
+   the axis that does the work, because skin of every shade lands in nearly
+   the same small patch of Cb/Cr and it is the brightness that varies rather
+   than the hue. A few rounds of mean shift then keep a hand, or a wooden door
+   in the background, from dragging the answer off the face.
+   What it never does is send a frame anywhere. The pixels are read into a
+   64x48 buffer, counted, and thrown away. */
+const CAM_W = 64, CAM_H = 48;                 // all the resolution this needs
+const HEAD = {
+  on:false, live:false, seen:false, note:'',
+  tilt:0, turn:0, push:1,                     // what the view actually reads off it
+  x:0, y:0, s:0, x0:null, y0:0, s0:0,         // the smoothed reading, and its zero
+  gTilt:80, gTurn:20, gZoom:50, ease:35,      // the knobs, in the panel's own units
+  mirror:true, spin:0,
+};
+Object.assign(HEAD, cfg.head || {});
+const saveHead = () => {
+  cfg.head = { gTilt:HEAD.gTilt, gTurn:HEAD.gTurn, gZoom:HEAD.gZoom,
+               ease:HEAD.ease, mirror:HEAD.mirror, spin:HEAD.spin, on:HEAD.on };
+  saveCfg();
+};
+
+let camVid = null, camCtx = null, camStream = null, camAt = 0;
+const camMask = new Uint8Array(CAM_W * CAM_H);   // one buffer, reused every frame
+
+/* One frame in, one head out — or null, when there is nothing face-shaped in
+   shot and the view should simply stay where it was rather than snapping back
+   to the middle. */
+function findHead(px) {
+  let sx = 0, sy = 0, n = 0;
+  for (let j = 0, p = 0, m = 0; j < CAM_H; j++)
+    for (let i = 0; i < CAM_W; i++, p += 4, m++) {
+      const r = px[p], g = px[p + 1], b = px[p + 2];
+      const y  =  0.299 * r + 0.587 * g + 0.114 * b;
+      const cb = -0.169 * r - 0.331 * g + 0.500 * b + 128;
+      const cr =  0.500 * r - 0.419 * g - 0.081 * b + 128;
+      const hit = (y > 44 && cb >= 77 && cb <= 133 && cr >= 133 && cr <= 180) ? 1 : 0;
+      camMask[m] = hit;
+      if (hit) { sx += i; sy += j; n++; }
+    }
+  if (n < CAM_W * CAM_H * 0.008) return null;      // nothing face-sized in shot
+  let cx = sx / n, cy = sy / n, cnt = n, rad = CAM_W * 0.45;
+  for (let k = 0; k < 3; k++) {                    // mean shift onto the biggest patch
+    let ax = 0, ay = 0, c = 0;
+    for (let j = 0, m = 0; j < CAM_H; j++)
+      for (let i = 0; i < CAM_W; i++, m++) {
+        if (!camMask[m]) continue;
+        const dx = i - cx, dy = j - cy;
+        if (dx * dx + dy * dy < rad * rad) { ax += i; ay += j; c++; }
+      }
+    if (!c) break;
+    cx = ax / c; cy = ay / c; cnt = c; rad *= 0.8;
+  }
+  // Area stands in for distance: a face twice as close covers four times as
+  // much frame, so its square root is the one that moves linearly.
+  return { x: cx / CAM_W - 0.5, y: cy / CAM_H - 0.5, s: Math.sqrt(cnt) / CAM_W, cx, cy,
+           r: Math.sqrt(cnt / Math.PI) };
+}
+
+/* The frame does not always arrive the way up the screen is — an iPad held in
+   landscape has its camera along one edge — and a front camera is a mirror.
+   Both are one line each here, and both are visible in the preview, which is
+   the only honest way to set them. */
+function orient(p) {
+  let x = p.x, y = p.y;
+  for (let k = 0; k < HEAD.spin; k++) { const t = x; x = -y; y = t; }
+  return { x: HEAD.mirror ? -x : x, y, s: p.s };
+}
+
+async function headStart() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    HEAD.on = false;
+    // Worth being specific: this is the failure everyone hits first, and the
+    // fix is a different URL rather than a different setting.
+    HEAD.note = window.isSecureContext
+      ? 'this browser will not hand over a camera.'
+      : 'a camera needs https. Open the hosted build, not the plain http LAN address.';
+    return paintHead();
+  }
+  HEAD.note = 'asking for the camera...';
+  paintHead();
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode:'user', width:{ ideal:320 }, height:{ ideal:240 } }, audio:false });
+  } catch (e) {
+    HEAD.on = false; HEAD.note = `no camera (${e.name}).`; return paintHead();
+  }
+  if (!camVid) {
+    camVid = document.createElement('video');
+    camVid.playsInline = true; camVid.muted = true; camVid.autoplay = true;
+    const c = document.createElement('canvas');
+    c.width = CAM_W; c.height = CAM_H;
+    camCtx = c.getContext('2d', { willReadFrequently:true });
+  }
+  camVid.srcObject = camStream;
+  try { await camVid.play(); } catch {}
+  HEAD.live = true;
+  HEAD.x0 = null;                       // wherever you are sitting now is the middle
+  HEAD.note = 'looking for you...';
+  paintHead();
+}
+function headStop() {
+  HEAD.live = false; HEAD.seen = false;
+  HEAD.tilt = 0; HEAD.turn = 0; HEAD.push = 1;
+  camStream?.getTracks().forEach(t => t.stop());
+  camStream = null;
+  if (camVid) camVid.srcObject = null;
+  headView.getContext('2d').clearRect(0, 0, headView.width, headView.height);
+  HEAD.note = 'off. The board tilts by dragging past the bench instead.';
+  paintHead();
+}
+
+function stepHead(now) {
+  if (!HEAD.live || now - camAt < 33) return;     // 30Hz is plenty, and cheap
+  camAt = now;
+  if (!camVid.videoWidth) return;
+  camCtx.drawImage(camVid, 0, 0, CAM_W, CAM_H);
+  const img = camCtx.getImageData(0, 0, CAM_W, CAM_H);
+  const raw = findHead(img.data);
+  // The preview and the readout exist to be tuned against. Drawing them at
+  // 30Hz behind a closed panel is pure waste, so they only run when open.
+  const showing = !debugEl.hidden;
+  if (showing) drawHeadView(img, raw);
+  HEAD.seen = !!raw;
+  if (!raw) { HEAD.note = 'cannot see a face.'; if (showing) paintHead(); return; }
+
+  const p = orient(raw);
+  const e = HEAD.ease / 100;
+  if (HEAD.x0 === null) {                          // first sight: that is the middle
+    HEAD.x = p.x; HEAD.y = p.y; HEAD.s = p.s;
+    HEAD.x0 = p.x; HEAD.y0 = p.y; HEAD.s0 = p.s;
+    HEAD.note = 'watching. CENTRE ME resets where straight-ahead is.';
+  } else {
+    HEAD.x += (p.x - HEAD.x) * e;
+    HEAD.y += (p.y - HEAD.y) * e;
+    HEAD.s += (p.s - HEAD.s) * e;
+  }
+  const D = Math.PI / 180;
+  // Head up means a smaller y in the frame, and a smaller polar angle is the
+  // view from above — so this reads the right way round with no sign flip.
+  HEAD.tilt = (HEAD.y - HEAD.y0) * HEAD.gTilt * D;
+  HEAD.turn = (HEAD.x - HEAD.x0) * HEAD.gTurn * D;
+  // Lean in and the face grows; how much of that true perspective is honoured
+  // is the knob, because all of it is more than anyone wants.
+  HEAD.push = 1 + (HEAD.s0 / Math.max(HEAD.s, 1e-3) - 1) * (HEAD.gZoom / 100);
+  if (showing) paintHead();
+}
+
+/* ---------- the panel ---------- */
+const headView = document.getElementById('headView');
+const headNote = document.getElementById('headNote');
+const headOut  = document.getElementById('headOut');
+const headOnEl = document.getElementById('headOn');
+const headMirEl = document.getElementById('headMirror');
+const headBox = document.getElementById('headBox');
+const headSpinBtn = document.getElementById('btnHeadSpin');
+const KNOBS = [
+  ['hTilt', 'gTilt', v => `${v}°`],
+  ['hTurn', 'gTurn', v => `${v}°`],
+  ['hZoom', 'gZoom', v => `${v}%`],
+  ['hEase', 'ease',  v => `${v}%`],
+].map(([id, key, fmt]) =>
+  ({ key, fmt, el: document.getElementById(id), out: document.getElementById(id + 'V') }));
+
+// The little frame is drawn through the same 64x48 buffer that was measured,
+// so what you are looking at is exactly what the tracker got.
+const previewBuf = document.createElement('canvas');
+previewBuf.width = CAM_W; previewBuf.height = CAM_H;
+const previewCtx = previewBuf.getContext('2d');
+function drawHeadView(img, raw) {
+  const g = headView.getContext('2d');
+  const W = headView.width, H = headView.height;
+  previewCtx.putImageData(img, 0, 0);
+  g.save();
+  if (HEAD.mirror) { g.translate(W, 0); g.scale(-1, 1); }
+  g.imageSmoothingEnabled = false;
+  g.drawImage(previewBuf, 0, 0, W, H);
+  if (raw) {
+    const x = raw.cx / CAM_W * W, y = raw.cy / CAM_H * H, r = Math.max(raw.r / CAM_W * W, 6);
+    g.strokeStyle = '#1f8a4c'; g.lineWidth = 2;
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.stroke();
+    g.beginPath(); g.moveTo(x - r - 5, y); g.lineTo(x + r + 5, y);
+    g.moveTo(x, y - r - 5); g.lineTo(x, y + r + 5); g.stroke();
+  }
+  g.restore();
+}
+function paintHead() {
+  headNote.textContent = HEAD.note;
+  headBox.hidden = !HEAD.live;
+  headOut.textContent = HEAD.live && HEAD.seen
+    ? `x ${HEAD.x.toFixed(2)}  y ${HEAD.y.toFixed(2)}  size ${HEAD.s.toFixed(2)}` +
+      `  →  tilt ${(HEAD.tilt * 180 / Math.PI).toFixed(0)}°` +
+      `  turn ${(HEAD.turn * 180 / Math.PI).toFixed(0)}°` +
+      `  zoom ${(HEAD.push * 100).toFixed(0)}%`
+    : '—';
+  for (const q of KNOBS) { q.el.value = HEAD[q.key]; q.out.textContent = q.fmt(HEAD[q.key]); }
+  headOnEl.checked = HEAD.on;
+  headMirEl.checked = HEAD.mirror;
+  headSpinBtn.textContent = `TURN INPUT ${HEAD.spin * 90}°`;
+}
+headOnEl.addEventListener('change', () => {
+  HEAD.on = headOnEl.checked;
+  saveHead();
+  HEAD.on ? headStart() : headStop();
+});
+headMirEl.addEventListener('change', () => { HEAD.mirror = headMirEl.checked; saveHead(); });
+for (const q of KNOBS)
+  q.el.addEventListener('input', e => { HEAD[q.key] = +e.target.value; saveHead(); paintHead(); });
+document.getElementById('btnHeadZero').addEventListener('click', () => { HEAD.x0 = null; });
+headSpinBtn.addEventListener('click', () => {
+  HEAD.spin = (HEAD.spin + 1) & 3; HEAD.x0 = null; saveHead(); paintHead();
+});
+HEAD.note = HEAD.on ? 'tap the board once to let the camera start.'
+                    : 'off. The board tilts by dragging past the bench instead.';
+paintHead();
+
 /* =========================== start screen =========================== */
 /* One plain tap, which is the one interaction iOS accepts as permission to
    make sound. Building never produces one: a drag calls preventDefault (which
@@ -2232,6 +2466,9 @@ paintKeyBtn();
     if (begun) return;
     begun = true;
     unlock();
+    // The same tap buys the camera as buys the sound: neither is handed over
+    // without one, and this is the only plain tap the app ever gets.
+    if (HEAD.on) headStart();
     startEl.classList.add('gone');
     setTimeout(() => startEl.remove(), 400);
   };
@@ -2275,11 +2512,13 @@ function tick(now) {
     land(p);
   }
   tickHolds(now);
+  stepHead(now);
   stepDemolition(dt);
   stepFlight(dt);
   renderer.render(scene, camera);
   if (++frames >= 30) {
-    statsEl.textContent = `${Math.round(frames * 1000 / (now - fpsT))} fps · ${placed.length} bricks · ${drags.size + nav.size} touches · audio ${audioState()}`;
+    statsEl.textContent = `${Math.round(frames * 1000 / (now - fpsT))} fps · ${placed.length} bricks · ${drags.size + nav.size} touches · audio ${audioState()}`
+      + (HEAD.live ? ` · head ${HEAD.seen ? 'seen' : 'lost'}` : '');
     fpsT = now; frames = 0;
   }
   requestAnimationFrame(tick);
@@ -2294,4 +2533,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayIdea, askWhich, chat, sinceLast, get subject(){ return subject; }, get asked(){ return asked; }, get rejected(){ return rejected; }, toPalette, widenPalette, scramble, pickParts, get trayParts(){ return trayParts; }, get trayColours(){ return trayColours; }, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, board, desk, groundAt, get grip(){ return grip; }, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayIdea, askWhich, chat, sinceLast, get subject(){ return subject; }, get asked(){ return asked; }, get rejected(){ return rejected; }, toPalette, widenPalette, scramble, pickParts, get trayParts(){ return trayParts; }, get trayColours(){ return trayColours; }, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, board, desk, HEAD, findHead, groundAt, get grip(){ return grip; }, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };

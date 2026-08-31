@@ -19,11 +19,16 @@ Kiosk shell (Electron — fullscreen, frameless, locked):
 
 ## Gestures (all simultaneous — every pointer is tracked independently)
 
+The camera is a person sitting at a bench. It never walks around it and never
+slides sideways — it leans and it tilts, and that is all. Everything else is
+the board, which spins and slides underneath.
+
 | Where | Gesture | Result |
 |---|---|---|
-| Plate | 1 finger drag | orbit — yaw free, tilt clamped 17°–80° |
-| Plate | 2 finger pinch | zoom, clamped 12–56 units |
-| Plate | 2 finger slide | spin |
+| Board or bench | 1 finger drag | push the board about — it slides, and turns a little, by where you pushed |
+| Board or bench | 2 finger twist | turn the board, 1:1 with your hand |
+| Board or bench | 2 finger pinch | zoom, clamped 12–56 units |
+| Past the bench | 1 finger drag | look around the room instead: tilt (17°–80°) and spin |
 | Menu | press + drag onto plate | the brick hangs off your finger in 3D; a ghost below it shows the landing spot — it tints red only if the stack would go over `MAX_STACK` |
 | Menu | release | brick falls from your hand into the socket — pop, and the board bounces |
 | Plate | drop onto a placed brick | it stacks; courses can be staggered or overhang |
@@ -34,15 +39,37 @@ Kiosk shell (Electron — fullscreen, frameless, locked):
 | Plate | release off the build | it lands on the desk and stays there, pickable later |
 | SHUFFLE | tap | a fresh random dozen out of 102 |
 | COLOURS | tap | new colours on the pieces already in the tray |
-| Plate | 2 finger drag | slide the board around, as well as pinch and spin |
 | CLEAR | tap | demolition — the build leaves one brick at a time |
 | WHAT NEXT? | tap | first time, Gemini guesses what it is and you pick; after that it suggests |
 
 Keyboard: `R` rotate, `Z` undo.
 
+### Why one finger turns it badly and two turn it well
+
+A drag on the board is not solved as a heading in degrees per pixel. It is
+solved backwards: pick the point of the board that is under the finger, and
+put *that same point* back under the finger every frame. Measured slip over a
+120px drag is zero.
+
+That pins two of the board's three degrees of freedom. The third — how much of
+the shove becomes spin — is decided the way a real bench decides it, by where
+you pushed:
+
+    turn = sweep * r² / (r² + ρ²)        ρ² = (w² + d²)/12
+
+ρ is the plate's radius of gyration, so this is just what a free body does when
+you shove it off-centre. Through the middle, 120px of travel turns the board
+1.3°; the same shove at the rim turns it 16°. Two fingers skip the guesswork
+entirely — a pair of contacts fixes an angle outright — so the board follows a
+twist 1:1. Hard one-handed, easy two-handed, and neither is a special case.
+
+The board stops half a diagonal short of the bench rim, so no corner of it can
+ever hang over the edge, whichever way it has been spun.
+
 ## How it works
 
-- `src/main.js` — everything: scene, camera rig, pointer routing, snapping.
+- `src/main.js` — everything: scene, bench and board rig, pointer routing,
+  snapping, head tracking.
 - 1 world unit = 1 stud pitch (8 mm). Plate = 0.4u, brick = 1.2u.
 - **Shape is skin, except where it isn't.** Slopes, curves and round parts are a
   2D side profile extruded across the piece's depth — four points for a slope,
@@ -446,6 +473,61 @@ header rather than a query parameter, so it stays out of URLs and logs.
 **This needs network access, so it does not work inside a published Claude
 artifact** — that page has a strict CSP that blocks external hosts. Use the
 GitHub Pages URL or `npm run dev`.
+
+## Head tracking (experimental, off by default)
+
+Tilt isn't really a gesture. Nobody drags a bench to see more of its top — they
+lean over it. So the front camera can watch where your head is and the view
+leans with it: **up** for a plan view, **in** for a closer look, **sideways**
+for a little parallax. Turn it on behind the key icon, under HEAD TRACKING.
+
+**How the head is found.** No model and no library — this has to survive being
+flattened into one file with nothing left to fetch. Frames go into a 64×48
+buffer and the face is found on chroma alone: skin of every shade lands in
+nearly the same small patch of Cb/Cr, and it is the brightness that varies, not
+the hue. Verified — a disc at RGB 96,64,52 and one at 250,224,208 give an
+identical centre and an identical size. Three rounds of mean shift then keep a
+hand, or a wooden door in the background, from dragging the answer off the
+face: a decoy blob in the corner of the frame moves the reading by 0.00px.
+
+Distance comes off the area, so its square root moves linearly with it — a
+face 1.56× wider reads as 1.56× nearer, measured.
+
+**What it drives.** The knobs are gains, not modes, and every one is live:
+
+| Knob | Default | What it does |
+|---|---|---|
+| lean up / down | 80° | tilt per head-height of travel. Head up ⇒ smaller polar angle ⇒ plan view |
+| lean left / right | 20° | camera parallax per head-width |
+| lean in / out | 50% | share of true perspective honoured on the zoom. 100% is more than anyone wants |
+| response | 35% | how hard the smoother chases the raw reading |
+
+Leaning sideways moves *the seat*, never the board: `view.az` — the answer to
+"which way is the board facing me" — is deliberately left out of it, so the
+brick in your hand and the map Gemini reads don't twitch as you shift about.
+
+Hands and head compose rather than fight. A pinch sets where the view is
+*parked* (`view.brad`), the head leans away from there (`view.trad`), so you can
+choose a zoom by hand and still nudge it by leaning in.
+
+**CENTRE ME** takes wherever you are sitting now as straight-ahead, which is
+also how the camera's position is dealt with: an iPad in landscape has its lens
+along one edge rather than above the screen, and re-zeroing absorbs that
+without a device table. If the frame itself arrives rotated, **TURN INPUT**
+cycles it; the preview is the honest way to check, since the crosshair is drawn
+through the same 64×48 buffer that was measured.
+
+Losing your face holds the view where it was rather than snapping it back to
+centre.
+
+**It needs HTTPS.** `getUserMedia` refuses on a plain-http origin, so the LAN
+dev address (`http://192.168.x.x:5173`) will not work on an iPad — use the
+Pages URL, or `http://127.0.0.1:5173` on the machine itself. The panel says so
+rather than failing silently. The camera is also unlikely to be reachable from
+inside the artifact iframe, which is not granted camera permission.
+
+No frame leaves the device. Pixels are read into the 64×48 buffer, counted, and
+thrown away; nothing is recorded and nothing is sent anywhere.
 
 ## Kiosk deployment notes
 
