@@ -539,11 +539,19 @@ through the same 64×48 buffer that was measured.
 Losing your face holds the view where it was rather than snapping it back to
 centre.
 
-**It needs HTTPS.** `getUserMedia` refuses on a plain-http origin, so the LAN
-dev address (`http://192.168.x.x:5173`) will not work on an iPad — use the
-Pages URL, or `http://127.0.0.1:5173` on the machine itself. The panel says so
-rather than failing silently. The camera is also unlikely to be reachable from
-inside the artifact iframe, which is not granted camera permission.
+**When it refuses.** `NotAllowedError` means three different things with three
+different fixes and the browser will not say which, so the panel works it out
+rather than printing the exception name:
+
+| What happened | What the panel says to do |
+|---|---|
+| running in an iframe (**the artifact**) | an embedded page is never handed a camera, and cannot ask. Open the Pages build in its own tab |
+| `permissions.query` says `denied` | the site is blocked — camera/padlock icon by the address bar, or iPad `aA` ▸ Website Settings ▸ Camera |
+| anything else | the prompt was refused or never appeared; on a Mac check System Settings ▸ Privacy & Security ▸ Camera |
+| plain-http origin | `getUserMedia` isn't even defined — the LAN dev address can't work, use the Pages URL |
+
+That last one is why `http://192.168.x.x:5173` will never work on the iPad,
+though `http://127.0.0.1:5173` is fine on the machine itself.
 
 No frame leaves the device. Pixels are read into the 64×48 buffer, counted, and
 thrown away; nothing is recorded and nothing is sent anywhere.

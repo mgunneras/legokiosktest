@@ -2404,6 +2404,32 @@ function orient(p) {
   return { x: HEAD.mirror ? -x : x, y, s: p.s };
 }
 
+/* Naming the exception is not a diagnosis. NotAllowedError in particular means
+   three completely different things with three completely different fixes, and
+   the browser will not say which — so work it out here, because "no camera
+   (NotAllowedError)" sends nobody anywhere. */
+async function whyRefused(e) {
+  if (e.name === 'NotFoundError' || e.name === 'OverconstrainedError')
+    return 'no front camera on this device.';
+  if (e.name !== 'NotAllowedError' && e.name !== 'SecurityError')
+    return `the camera failed to start (${e.name}).`;
+  // An embedded page is never given a camera unless the page embedding it says
+  // so, and it cannot ask. This is the artifact, and no setting will fix it.
+  if (window.self !== window.top)
+    return 'this copy is embedded in another page, which is never handed a ' +
+           'camera. Open the hosted build in its own tab and turn it on there.';
+  // Chrome answers this; Safari does not know the name and throws.
+  let state = '';
+  try { state = (await navigator.permissions.query({ name:'camera' })).state; } catch {}
+  if (state === 'denied')
+    return 'this site is blocked from using the camera. Chrome: click the ' +
+           'camera or padlock icon by the address bar, set Camera to Allow, ' +
+           'reload. iPad: the "aA" menu > Website Settings > Camera > Allow.';
+  return 'permission was refused. Tick the box again and choose Allow. If no ' +
+         'prompt appears, the browser itself may lack camera access — on a Mac ' +
+         'that is System Settings > Privacy & Security > Camera.';
+}
+
 async function headStart() {
   if (!navigator.mediaDevices?.getUserMedia) {
     HEAD.on = false;
@@ -2420,7 +2446,9 @@ async function headStart() {
     camStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode:'user', width:{ ideal:320 }, height:{ ideal:240 } }, audio:false });
   } catch (e) {
-    HEAD.on = false; HEAD.note = `no camera (${e.name}).`; return paintHead();
+    HEAD.on = false;
+    HEAD.note = await whyRefused(e);
+    return paintHead();
   }
   if (!camVid) {
     camVid = document.createElement('video');
