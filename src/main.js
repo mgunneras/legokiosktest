@@ -31,8 +31,16 @@ const FLICK_LIFT  = 0.30;         // fraction of speed added upward, to make an 
 const CRASH_ODDS  = 0.2;          // one in five is a dud, as asked
 const ESCAPE      = 24;           // outward kick on a botched landing
 const ESCAPE_SOFT = 9;            // ...and a gentler one, to shed onto the table
+const DESK_R      = GRID * 1.45;      // the bench the baseplate is pushed around on
 const TABLE_Y     = -PLATE - 0.005;   // the desk the baseplate sits on
-const TABLE_R     = GRID * 1.25 - 1;  // ...as far as a brick can come to rest
+const TABLE_R     = DESK_R - 1;       // ...as far as a brick can come to rest
+/* The board may be shoved anywhere on the bench but never over the rim. Its
+   worst corner is half a diagonal from the middle whichever way it has been
+   spun, so a single radius covers every heading. */
+const SLIDE_MAX   = DESK_R - Math.SQRT2 * GRID / 2;
+/* Radius of gyration squared for a square plate, (w^2 + d^2)/12 — the number
+   that decides how much of a one-fingered shove turns into spin. */
+const RHO2        = (GRID * GRID + GRID * GRID) / 12;
 const HOLD_MS     = 180;          // press-and-hold before a brick comes loose
 const HOLD_SLOP   = 7;            // px of travel that turns a hold into an orbit
 const DOUBLE_MS   = 340;
@@ -644,6 +652,22 @@ function buildBrick(def, ghost = false, tintHex = null) {
 /* ---------- baseplate ---------- */
 /* `build` holds the plate and everything placed on it, so the bounce moves the
    board and its bricks together. Y only — grid maths stays in world X/Z.     */
+/* The bench is the room's, not the board's: it never moves, and the board is
+   pushed about on top of it. Anything that has been knocked off the build and
+   come to rest belongs to the bench too — a brick on the table stays where it
+   was left when the board is spun. */
+const desk = new THREE.Group();
+scene.add(desk);
+{
+  const top = new THREE.Mesh(
+    new THREE.CylinderGeometry(DESK_R, DESK_R, 0.05, 96),
+    new THREE.MeshPhongMaterial({ color:'#c8d2e2', shininess:6 })
+  );
+  top.position.y = -PLATE - 0.03;    // so its face lands exactly on TABLE_Y
+  top.receiveShadow = true;          // so the board casts onto it and reads as sitting there
+  desk.add(top);
+}
+
 const build = new THREE.Group();
 scene.add(build);
 const plateGroup = new THREE.Group();
@@ -653,6 +677,7 @@ build.add(plateGroup);
   base.scale.set(GRID, PLATE, GRID);
   base.position.y = -PLATE / 2;
   base.receiveShadow = true;
+  base.castShadow = true;            // there is a bench under it now to catch it
   base.userData.isBase = true;
   plateGroup.add(base);
 
@@ -666,12 +691,6 @@ build.add(plateGroup);
       inst.setMatrixAt(n++, m.makeTranslation(i - GRID/2 + .5, STUD_H/2, j - GRID/2 + .5));
   plateGroup.add(inst);
 
-  const skirt = new THREE.Mesh(
-    new THREE.CylinderGeometry(GRID * 1.25, GRID * 1.25, 0.05, 72),
-    new THREE.MeshBasicMaterial({ color:'#d5deec' })
-  );
-  skirt.position.y = -PLATE - 0.03;
-  plateGroup.add(skirt);
 }
 
 /* ---------- world state ---------- */
@@ -808,62 +827,114 @@ function detach(rec, defer) {
   else                       { drop1(loose, rec); }
   drop1(hitList, rec.g.userData.pickBody);
   drop1(pickList, rec.g.userData.pickBody);
-  build.remove(rec.g);
+  rec.g.parent?.remove(rec.g);
 }
 
-/* =========================== camera rig =========================== */
-const view = { az: -0.7, pol: 0.92, rad: 34, taz: -0.7, tpol: 0.92, trad: 34,
-               px: 0, pz: 0, tpx: 0, tpz: 0 };     // and where it has been slid to
-const PAN_MAX = 26;                                 // far enough to work a corner
-const HOME = { az: -0.7, pol: 0.92, rad: 34 };
+/* =========================== bench and board =========================== */
+/* Two frames of reference meet here, and keeping them apart is what makes the
+   thing feel like an object rather than a picture of one.
+     - The camera is a person sitting at a bench. It never walks around and it
+       never slides sideways. It leans in and out, and it tilts. That is all.
+     - Everything else is the board, which spins and slides under the hands.
+   Every "which way is it facing me" question in the rest of the file still asks
+   `view.az`, which is now derived rather than driven: the camera sits at a
+   fixed heading and the board turns, so the angle between them is one minus
+   the other. Nothing downstream can tell the difference. */
+const view  = { pol: 0.92, rad: 34, tpol: 0.92, trad: 34, az: -0.7 };
+const board = { yaw: 0, x: 0, z: 0, tyaw: 0, tx: 0, tz: 0 };
+const HOME  = { az: -0.7, pol: 0.92, rad: 34 };
 const POL_MIN = 0.30, POL_MAX = 1.40;            // ~17° (top-down-ish) .. ~80° (near horizon)
 const RAD_MIN = 12,  RAD_MAX = 56;
+const EASE = 0.22;                               // how hard the view chases its target
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const wrapPi = a => Math.atan2(Math.sin(a), Math.cos(a));
 
-/* The lamp belongs to the room, not to the board. The board is static in world
-   space and the camera is what orbits, so a world-fixed light stays fixed
-   *relative to the board* and its shadows never move — you're walking around a
-   lit table. Carrying the lights around with the azimuth pins them to the
-   viewer instead, so the model turns underneath them and the shadows sweep:
-   a baseboard spun on a workbench. Offsets are measured from the home view, so
-   the default framing is lit exactly as it was. */
-const SUN = { r: Math.hypot(9, 7),  y: 16, off: Math.atan2(9, 7)   - HOME.az };
-const RIM = { r: Math.hypot(8, 9),  y:  6, off: Math.atan2(-8, -9) - HOME.az };
-function placeLights() {
-  const a = view.az + SUN.off, b = view.az + RIM.off;
-  sun.position.set(SUN.r * Math.sin(a), SUN.y, SUN.r * Math.cos(a));
-  rim.position.set(RIM.r * Math.sin(b), RIM.y, RIM.r * Math.cos(b));
+/* The lamp is bolted to the bench: fixed height, fixed heading, and the board
+   turns underneath it, so the shadows sweep round for real instead of being
+   faked by dragging the lights along with the camera. Only the patch of bench
+   the shadow map covers travels with the board — a 1024 map spread over the
+   whole room would be a waste of most of it. */
+const SUN_OFF = new THREE.Vector3(9, 16, 7);
+const sunTarget = new THREE.Object3D();
+scene.add(sunTarget);
+sun.target = sunTarget;
+
+function applyBoard() {
+  build.rotation.y = board.yaw;
+  build.position.x = board.x;
+  build.position.z = board.z;
+  view.az = HOME.az - board.yaw;      // how the board is turned, from where you sit
+  sunTarget.position.set(board.x, 0, board.z);
+  sunTarget.updateMatrixWorld();
+  sun.position.copy(sunTarget.position).add(SUN_OFF);
+  // A raycast can follow in the same event, before the renderer has run.
+  build.updateMatrixWorld(true);
 }
 
 function applyCamera() {
-  view.az  += (view.taz  - view.az)  * 0.2;
-  view.pol += (view.tpol - view.pol) * 0.2;
-  view.rad += (view.trad - view.rad) * 0.2;
-  view.px  += (view.tpx  - view.px)  * 0.2;
-  view.pz  += (view.tpz  - view.pz)  * 0.2;
-  // The look-at point slides with the pan, so the board moves across the screen
-  // rather than the camera swinging and changing the angle you see it from.
-  aim.set(TARGET.x + view.px, TARGET.y, TARGET.z + view.pz);
+  view.pol  += (view.tpol  - view.pol)  * EASE;
+  view.rad  += (view.trad  - view.rad)  * EASE;
+  board.yaw += (board.tyaw - board.yaw) * EASE;
+  board.x   += (board.tx   - board.x)   * EASE;
+  board.z   += (board.tz   - board.z)   * EASE;
+  applyBoard();
+  aim.copy(TARGET);
   const s = Math.sin(view.pol);
   camera.position.set(
-    aim.x + view.rad * s * Math.sin(view.az),
-    aim.y + view.rad * Math.cos(view.pol),
-    aim.z + view.rad * s * Math.cos(view.az)
+    TARGET.x + view.rad * s * Math.sin(HOME.az),
+    TARGET.y + view.rad * Math.cos(view.pol),
+    TARGET.z + view.rad * s * Math.cos(HOME.az)
   );
   camera.lookAt(aim);
   camera.updateMatrixWorld();   // keep raycasts in sync with the damped camera
-  placeLights();                // ...and the lamp with it
 }
-const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 /* =========================== pointer routing =========================== */
 /* Every pointer is independently owned by either the navigator (stage) or a
-   drag session (menu). One hand can orbit while the other drags a brick.      */
+   drag session (menu). One hand can hold the board while the other drags a
+   brick.                                                                     */
 const nav   = new Map();   // pointerId -> {x,y}
 const drags = new Map();   // pointerId -> {def, tile, held, ghost, sol, rot, az0}
-let pinch = null;          // {dist, rad, mx, az}
+let grip = null;           // the board, held: see regrab()
+let onDeck = false;        // did this gesture start on the bench, or past it?
 let manualRot = 0;         // optional 90° offset; the plate's angle does the rest
 let flickOn = true;        // throwing; F turns it off, there is no button
 let selected = 0;
+
+/* Where a screen point meets the top of the board. Null when the ray is aimed
+   at the sky, which is the one place a drag can't be about the board. */
+const GROUND = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const gpt = new THREE.Vector3();
+function groundAt(x, y) {
+  if (!castFrom(x, y)) return null;
+  return ray.ray.intersectPlane(GROUND, gpt) ? gpt.clone() : null;
+}
+const onBench = p => !!p && p.x * p.x + p.z * p.z <= DESK_R * DESK_R;
+
+/* Take hold of the board — or take hold of it again, because a hand that gains
+   or loses a finger is a different grip and has to be re-seated. What is
+   remembered is a point *of the board*, so that whatever happens next, that
+   point can be put back under the hand.
+   This is also the only place that decides whether the gesture is about the
+   board at all. Re-deciding on a change of grip is fine — that is already a new
+   hold — but never mid-drag: a finger that starts on the board and wanders off
+   into the sky is still holding the board. */
+function regrab() {
+  const pts = [...nav.values()];
+  const gs = pts.map(p => groundAt(p.x, p.y));
+  if (!gs.length || gs.length > 2 || gs.some(g => !g)) { grip = null; onDeck = false; return; }
+  const m = gs.length === 2 ? gs[0].clone().add(gs[1]).multiplyScalar(0.5) : gs[0].clone();
+  onDeck = onBench(m);
+  if (!onDeck) { grip = null; return; }
+  grip = {
+    n: gs.length,
+    q: build.worldToLocal(m.clone()),      // the bit of board under the hand
+    at: m.clone(),                          // ...and where it was last seen
+    twist: gs.length === 2 ? Math.atan2(gs[1].z - gs[0].z, gs[1].x - gs[0].x) : 0,
+    dist: gs.length === 2 ? Math.max(Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y), 1) : 1,
+    rad: view.trad,
+  };
+}
 
 /* ---------- navigation (stage) ---------- */
 stageEl.addEventListener('pointerdown', e => {
@@ -874,44 +945,80 @@ stageEl.addEventListener('pointerdown', e => {
     if (hit && hit.object.userData.owner) startHold(e, hit.object.userData.owner, hit.point);
   }
   nav.set(e.pointerId, { x:e.clientX, y:e.clientY });
-  if (nav.size === 2) startPinch();
+  regrab();
 });
+
 function moveNav(e) {
   const p = nav.get(e.pointerId);
   if (!p) return;
   const dx = e.clientX - p.x, dy = e.clientY - p.y;
   p.x = e.clientX; p.y = e.clientY;
 
-  if (nav.size === 1) {                                   // one finger: orbit
-    view.taz  -= dx * 0.006;
-    view.tpol  = clamp(view.tpol - dy * 0.006, POL_MIN, POL_MAX);
-  } else if (nav.size === 2 && pinch) {                   // two fingers: zoom + spin
-    const [a, b] = [...nav.values()];
-    const dist = Math.hypot(a.x - b.x, a.y - b.y);
-    const mx   = (a.x + b.x) / 2;
-    view.trad = clamp(pinch.rad * (pinch.dist / Math.max(dist, 1)), RAD_MIN, RAD_MAX);
-    view.taz  = pinch.az - (mx - pinch.mx) * 0.004;
-    // ...and slide it about, in the plane of the board as it appears on screen,
-    // so pushing right pushes it right whichever way round it has been spun.
-    const my = (a.y + b.y) / 2;
-    const k  = view.trad * 0.0016;
-    const dx = (mx - pinch.mx) * k, dy = (my - pinch.my) * k;
-    view.tpx = clamp(pinch.px - (dx * Math.cos(view.az) - dy * Math.sin(view.az)), -PAN_MAX, PAN_MAX);
-    view.tpz = clamp(pinch.pz + (dx * Math.sin(view.az) + dy * Math.cos(view.az)), -PAN_MAX, PAN_MAX);
+  /* Past the rim there is no board to hold, so a drag out there moves the head
+     instead: it is the one gesture that isn't about the object. It is also the
+     only way to tilt when the camera isn't watching you. */
+  if (!onDeck) {
+    if (nav.size === 1) {
+      board.tyaw += dx * 0.006;
+      view.tpol = clamp(view.tpol - dy * 0.006, POL_MIN, POL_MAX);
+    }
+    return;
   }
-}
-function endNav(e) {
-  if (!nav.delete(e.pointerId)) return;
-  pinch = null;
-  if (nav.size === 2) startPinch();
-}
-function startPinch() {
-  const [a, b] = [...nav.values()];
-  pinch = { dist: Math.max(Math.hypot(a.x - b.x, a.y - b.y), 1), rad: view.trad,
-            mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, az: view.taz,
-            px: view.tpx, pz: view.tpz };
+  if (!grip) return;
+  const pts = [...nav.values()];
+  if (pts.length !== grip.n) return;
+  const gs = pts.map(q => groundAt(q.x, q.y));
+  if (gs.some(g => !g)) return;
+
+  let m, turn = 0;
+  if (grip.n === 2) {
+    /* Two hands on it and there is nothing left to guess: a pair of contacts
+       fixes an angle outright, so the board turns exactly as far as they do.
+       This is the easy way round, and it is why one finger is the hard way. */
+    m = gs[0].clone().add(gs[1]).multiplyScalar(0.5);
+    const t = Math.atan2(gs[1].z - gs[0].z, gs[1].x - gs[0].x);
+    turn = wrapPi(t - grip.twist);
+    grip.twist = t;
+    // Pinch reads in pixels, not in world units: measuring the spread on the
+    // board it is currently scaling would chase its own tail.
+    const d = Math.max(Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y), 1);
+    view.trad = view.rad = clamp(grip.rad * (grip.dist / d), RAD_MIN, RAD_MAX);
+  } else {
+    /* One finger is a shove, not a grip, so how much of it becomes spin is
+       settled the way a real bench settles it: by where you pushed. r² over
+       r² plus the plate's radius of gyration squared is the share of a shove
+       that a free body puts into turning — none at all through the middle,
+       most of it out at the rim. Which is exactly the asked-for feel: hard to
+       turn with one finger, and never impossible. */
+    m = gs[0];
+    const cx = m.x - board.x,       cz = m.z - board.z;
+    const px = grip.at.x - board.x, pz = grip.at.z - board.z;
+    const r2 = cx * cx + cz * cz;
+    turn = wrapPi(Math.atan2(cz, cx) - Math.atan2(pz, px)) * (r2 / (r2 + RHO2));
+  }
+  grip.at.copy(m);
+  // Turning about +Y carries a point the other way round in atan2(z, x), so the
+  // yaw runs opposite to the angle the hand swept.
+  board.yaw = board.tyaw = board.yaw - turn;
+
+  /* The turn chose a heading; this pins the board down. Whatever it did, the
+     bit of board that was picked up goes back under the hand — which is the
+     whole feel being chased, and the reason none of this is expressed as a
+     camera nudge per pixel of travel. */
+  const c = Math.cos(board.yaw), s = Math.sin(board.yaw);
+  let bx = m.x - (grip.q.x * c + grip.q.z * s);
+  let bz = m.z - (grip.q.z * c - grip.q.x * s);
+  const d = Math.hypot(bx, bz);
+  if (d > SLIDE_MAX) { bx *= SLIDE_MAX / d; bz *= SLIDE_MAX / d; }   // and never off the bench
+  board.x = board.tx = bx;
+  board.z = board.tz = bz;
+  applyBoard();          // the next groundAt in this same gesture must see it
 }
 
+function endNav(e) {
+  if (!nav.delete(e.pointerId)) return;
+  regrab();
+}
 
 /* =========================== placement solving =========================== */
 const ray = new THREE.Raycaster();
@@ -924,6 +1031,7 @@ const HOVER = 1.05;                                 // how high a held brick flo
 const LIFT  = 0.5;                                  // ...and how far above the fingertip
 const hoverPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const tmpV = new THREE.Vector3(), camUp = new THREE.Vector3(), flingV = new THREE.Vector3();
+const tmpQ = new THREE.Vector3();   // a room point, borrowed by the board
 
 /* aim `ray` at a screen point — false if that point isn't over the 3D stage */
 function castFrom(clientX, clientY) {
@@ -964,23 +1072,33 @@ function solveAt(px, pz, def, rot) {
   }
   return { i0, j0, w, d, h, ok };
 }
+/* A raycast answers in the room's coordinates; the grid only knows the board's.
+   Everything on the far side of this function is board-local, which is what
+   lets `solveAt` and the whole of `heights` carry on as though the board had
+   never moved. The face normal has to be taken into the room first — it comes
+   out of the geometry in the brick's own axes, and the brick is turned. */
+const tmpN = new THREE.Vector3(), tmpH = new THREE.Vector3();
+function boardHit(hit) {
+  // nudge into the column we actually hit — side faces sit exactly on a seam
+  tmpN.copy(hit.face.normal).transformDirection(hit.object.matrixWorld);
+  return build.worldToLocal(tmpH.copy(hit.point).addScaledVector(tmpN, -0.02));
+}
 /* ...and where does the brick under `ray` land? null if it misses the build */
 function solveRay(def, rot, gx = 0, gz = 0) {
   const hit = ray.intersectObjects(hitList, false)[0];
   if (!hit) return null;
-  // nudge into the column we actually hit (side faces sit exactly on a seam),
-  // then back off by the grab so the piece lands where the finger is holding it
-  return solveAt(hit.point.x - hit.face.normal.x * 0.02 - gx,
-                 hit.point.z - hit.face.normal.z * 0.02 - gz, def, rot);
+  // back off by the grab, so the piece lands where the finger is holding it
+  const p = boardHit(hit);
+  return solveAt(p.x - gx, p.z - gz, def, rot);
 }
 const solve = (x, y, def, rot) => castFrom(x, y) ? solveRay(def, rot) : null;
 function solveRayAsm(asm, R, gx = 0, gz = 0) {
   const hit = ray.intersectObjects(hitList, false)[0];
   if (!hit) return null;
-  return solveAsm(hit.point.x - hit.face.normal.x * 0.02 - gx,
-                  hit.point.z - hit.face.normal.z * 0.02 - gz, asm, R);
+  const p = boardHit(hit);
+  return solveAsm(p.x - gx, p.z - gz, asm, R);
 }
-const overBoard = p => Math.abs(p.x) <= GRID / 2 && Math.abs(p.z) <= GRID / 2;
+const overBoard = q => Math.abs(q.x) <= GRID / 2 && Math.abs(q.z) <= GRID / 2;
 
 const placeX = (i0, w) => i0 - GRID / 2 + w / 2;
 
@@ -1027,11 +1145,13 @@ function tickHolds(now) {
 function liftBrick(pid, h) {
   const rec = h.rec;
   cancelHold(pid);
-  nav.delete(pid);                                // this is a drag now, not an orbit
-  pinch = null;
+  nav.delete(pid);                                // this is a drag now, not a grip
+  grip = null; onDeck = false;
   pluckSound(true);
   if (rec.kind === 'loose') {                     // a desk piece is only ever itself
     const def = rec.def;
+    // a loose brick belongs to the bench, so the stored hit is already in its
+    // coordinates; a placed one has to be brought onto the board first
     const grab = h.hit && { x: h.hit.x - rec.g.position.x, z: h.hit.z - rec.g.position.z };
     detach(rec);
     beginDrag({ pointerId: pid, clientX: h.x, clientY: h.y }, def, null, undefined, null, grab);
@@ -1046,7 +1166,8 @@ function liftBrick(pid, h) {
   // to be held by its middle.
   let i0 = GRID, j0 = GRID;
   for (const m of members) { i0 = Math.min(i0, m.sol.i0); j0 = Math.min(j0, m.sol.j0); }
-  const grab = h.hit && { x: h.hit.x - placeX(i0, asm.W), z: h.hit.z - placeX(j0, asm.D) };
+  const bh = h.hit && build.worldToLocal(h.hit.clone());
+  const grab = bh && { x: bh.x - placeX(i0, asm.W), z: bh.z - placeX(j0, asm.D) };
   for (const m of members) detach(m, true);
   rebuildHeights();
   // The lump comes up in the orientation it was sitting in, so it starts unturned.
@@ -1150,7 +1271,7 @@ function refreshDrag(s) {
   // answering "where does this land", not "what is my hand doing".
   s.yawTo = turns * (Math.PI / 2);
   s.yaw += (s.yawTo - s.yaw) * 0.32;
-  s.held.rotation.y = s.yaw;
+  s.held.rotation.y = board.yaw + s.yaw;   // the hand is in the room's axes
   if (!s.ghost) { s.ghost = buildBrick(s.def, true); build.add(s.ghost); }
   s.ghost.rotation.y = rot * (Math.PI / 2);         // built once, only ever turned
   s.rot = rot;
@@ -1167,14 +1288,17 @@ function refreshDrag(s) {
   s.held.visible = over;
   if (over) {                                       // hang the brick under the finger
     const hh = (s.asm ? s.asm.H : s.def.p) * PLATE;
-    const y  = (sol ? sol.h * PLATE : 0) + HOVER;
+    // the landing height is the board's; the hand's is the room's, and the
+    // board is a bounce away from level
+    const y  = (sol ? sol.h * PLATE : 0) + HOVER + build.position.y;
     hoverPlane.constant = -y;
     if (ray.ray.intersectPlane(hoverPlane, tmpV)) {
       // sit just above the fingertip, so the finger and the brick don't hide
       // the landing ghost directly beneath them on the same screen ray
       camUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
-      const hx = s.gx * Math.cos(s.yaw) + s.gz * Math.sin(s.yaw);
-      const hz = -s.gx * Math.sin(s.yaw) + s.gz * Math.cos(s.yaw);
+      const wy = board.yaw + s.yaw;
+      const hx = s.gx * Math.cos(wy) + s.gz * Math.sin(wy);
+      const hz = -s.gx * Math.sin(wy) + s.gz * Math.cos(wy);
       s.held.position.set(tmpV.x - hx, y - hh / 2, tmpV.z - hz).addScaledVector(camUp, LIFT);
     }
     // Velocity comes off the brick's own world position, not the screen, so a
@@ -1264,10 +1388,9 @@ const oriented = (def, rot) => {
 
 function place(def, sol, rot, from) {
   const p = commit(oriented(def, rot), def, sol, rot);
-  // fall into the socket from wherever the hand released it (`from` is world,
-  // `base` is board-local — they differ by however far the board is bouncing)
-  const off = from ? from.clone().sub(p.base) : new THREE.Vector3(0, 0.9, 0);
-  if (from) off.y -= build.position.y;
+  // fall into the socket from wherever the hand released it — `from` is the
+  // room's, `base` the board's, and the board is bounced and turned and slid
+  const off = from ? build.worldToLocal(from.clone()).sub(p.base) : new THREE.Vector3(0, 0.9, 0);
   p.g.position.copy(p.base).add(off);
   p.anim = { off, t: 0, v: 0.015 };
 }
@@ -1300,10 +1423,12 @@ function placeAsm(asm, sol) {
    vanishing, the same as a single piece dropped off the build. */
 function shedAsm(asm, R, from) {
   const t = turnAsm(asm, R);
+  const c = Math.cos(board.yaw), sn = Math.sin(board.yaw);
   for (const p of t.parts) {
     const at = from.clone();
-    at.x += (p.di - t.W / 2 + 0.5) * 0.9;
-    at.z += (p.dj - t.D / 2 + 0.5) * 0.9;
+    const ox = (p.di - t.W / 2 + 0.5) * 0.9, oz = (p.dj - t.D / 2 + 0.5) * 0.9;
+    at.x += ox * c + oz * sn;                  // the lump comes apart along its own
+    at.z += oz * c - ox * sn;                  // rows, however the board is turned
     at.y += p.dh * PLATE;
     discard(p.def, p.rot, at, new THREE.Vector3());
   }
@@ -1314,9 +1439,9 @@ function shedAsm(asm, R, from) {
    committed to before it ever touches down, so it tumbles the whole way in. */
 function launch(def, rot, from, vel) {
   const g = oriented(def, rot);
-  g.position.copy(from);
-  g.position.y -= build.position.y;             // world -> board-local
-  build.add(g);
+  g.rotation.y += board.yaw;                    // a brick in the air belongs to the room,
+  g.position.copy(from);                        // not to the board it may or may not reach
+  desk.add(g);
   const speed = clamp(vel.length() * FLICK_SCALE, FLICK_SLOW, FLICK_FAST);
   vel.setLength(speed).y += speed * FLICK_LIFT;  // a little loft, so it arcs
   flying.push({ g, def, rot, vel, spin:null, bounces:0, age:0,
@@ -1330,7 +1455,7 @@ function botch(f, top, kick = ESCAPE, lift = 18) {
   p.y = top + 0.001;
   f.bounces++;
   f.sticks = false;
-  const out = new THREE.Vector3(p.x, 0, p.z);
+  const out = new THREE.Vector3(p.x - build.position.x, 0, p.z - build.position.z);
   if (out.lengthSq() < 1) out.set(f.vel.x, 0, f.vel.z);
   if (out.lengthSq() < 1e-6) out.set(1, 0, 0);
   out.normalize();
@@ -1348,9 +1473,9 @@ function botch(f, top, kick = ESCAPE, lift = 18) {
    there, at whatever angle it came to rest — no grid, no stack, still yours. */
 function discard(def, rot, from, vel) {
   const g = oriented(def, rot);
+  g.rotation.y += board.yaw;
   g.position.copy(from);
-  g.position.y -= build.position.y;
-  build.add(g);
+  desk.add(g);
   const v = vel.clone().multiplyScalar(FLICK_SCALE * 0.6);
   if (v.length() > 14) v.setLength(14);
   flying.push({ g, def, rot, mode:'discard', vel:v, bounces:0, age:0, sticks:false,
@@ -1362,8 +1487,14 @@ function discard(def, rot, from, vel) {
    doomed, so the ordinary botch path carries it away.                        */
 function chuck(rec, boost = 1) {
   const { g, def } = rec, rot = rec.rot || 0;
+  // It may be leaving the board or leaving the bench; either way it leaves in
+  // the room's coordinates, from exactly where it was sitting.
+  const at = g.getWorldPosition(new THREE.Vector3());
+  const face = g.getWorldQuaternion(new THREE.Quaternion());
   detach(rec);
-  build.add(g);
+  desk.add(g);
+  g.position.copy(at);
+  g.quaternion.copy(face);
   // Straight up and radially out is tidy and dull. Scatter the heading either
   // side of "away from the middle" and give it a properly silly amount of
   // height, so no two go the same way and none of them look deliberate.
@@ -1453,17 +1584,21 @@ function stepFlight(dt) {
 
     const p = f.g.position;
     if (f.vel.y < 0) {
-      if (overBoard(p)) {
-        const sol = solveAt(p.x, p.z, f.def, f.rot);
-        if (p.y <= sol.h * PLATE) {
+      // Two surfaces, two frames: the board is wherever it has been pushed to,
+      // the bench is always where it was.
+      const q = build.worldToLocal(tmpQ.copy(p));
+      if (overBoard(q)) {
+        const sol = solveAt(q.x, q.z, f.def, f.rot);
+        if (q.y <= sol.h * PLATE) {
+          const top = sol.h * PLATE + build.position.y;
           if (f.sticks && sol.ok) {
             land(commit(f.g, f.def, sol, f.rot));   // clicks in exactly like a drop
             flying.splice(n, 1);
             continue;
           }
           // a discard that came down over the build sheds sideways onto the desk
-          f.mode === 'discard' ? botch(f, sol.h * PLATE, ESCAPE_SOFT, 7)
-                               : botch(f, sol.h * PLATE);
+          f.mode === 'discard' ? botch(f, top, ESCAPE_SOFT, 7)
+                               : botch(f, top);
         }
       } else if (p.y <= TABLE_Y && Math.hypot(p.x, p.z) <= TABLE_R) {
         if (f.mode === 'discard') { if (tableBounce(f)) { flying.splice(n, 1); continue; } }
@@ -1471,7 +1606,7 @@ function stepFlight(dt) {
       }
     }
     if (p.y < -25 || f.age > FLIGHT_MAX) {        // gone off the table for good
-      build.remove(f.g);
+      f.g.parent?.remove(f.g);
       flying.splice(n, 1);
     }
   }
@@ -1604,8 +1739,10 @@ tap('btnClear', () => {
   tray = null; scramble();               // ...and a fresh handful of pieces
 });
 tap('btnHome', () => {
-  view.taz = HOME.az; view.tpol = HOME.pol; view.trad = HOME.rad;
-  view.tpx = 0; view.tpz = 0;             // and back to the middle of the table
+  view.tpol = HOME.pol; view.trad = HOME.rad;
+  // square to the bench and back in the middle of it, keeping the build upright
+  board.tyaw = Math.round(board.yaw / (Math.PI * 2)) * Math.PI * 2;
+  board.tx = 0; board.tz = 0;
 });
 tap('btnFull', () => {
   if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
@@ -2157,4 +2294,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayIdea, askWhich, chat, sinceLast, get subject(){ return subject; }, get asked(){ return asked; }, get rejected(){ return rejected; }, toPalette, widenPalette, scramble, pickParts, get trayParts(){ return trayParts; }, get trayColours(){ return trayColours; }, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayIdea, askWhich, chat, sinceLast, get subject(){ return subject; }, get asked(){ return asked; }, get rejected(){ return rejected; }, toPalette, widenPalette, scramble, pickParts, get trayParts(){ return trayParts; }, get trayColours(){ return trayColours; }, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, board, desk, groundAt, get grip(){ return grip; }, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
