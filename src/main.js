@@ -875,7 +875,47 @@ function applyBoard() {
   build.updateMatrixWorld(true);
 }
 
-function applyCamera() {
+/* The board is a solid thing being pushed across a table with other solid
+   things on it. Shoving it into them and having them sit inside it would give
+   the whole illusion away, so the leading edge knocks them clear — at whatever
+   speed that edge is actually travelling, which for a spun board is faster at
+   the corners than in the middle. */
+const swept = { x:0, z:0, yaw:0 };
+const cvel = new THREE.Vector3();
+function sweep(dt) {
+  const dx = board.x - swept.x, dz = board.z - swept.z, dyaw = wrapPi(board.yaw - swept.yaw);
+  swept.x = board.x; swept.z = board.z; swept.yaw = board.yaw;
+  if (!loose.length || dt <= 0) return;
+  if (Math.abs(dx) + Math.abs(dz) + Math.abs(dyaw) * 8 < 1e-3) return;   // sitting still
+  const half = GRID / 2 + 0.4;                    // the plate, plus a brick's shoulder
+  const w = -dyaw / dt;                           // +Y turn carries a point the other way
+  for (let i = loose.length - 1; i >= 0; i--) {
+    const rec = loose[i];
+    const p = rec.g.position;                     // the bench is the room: no transform
+    const q = build.worldToLocal(tmpQ.copy(p));
+    if (Math.abs(q.x) > half || Math.abs(q.z) > half) continue;
+    // out by whichever edge it is nearest, in the board's own axes
+    const ox = half - Math.abs(q.x), oz = half - Math.abs(q.z);
+    const nx = ox <= oz ? Math.sign(q.x) || 1 : 0, nz = ox <= oz ? 0 : Math.sign(q.z) || 1;
+    const out = build.localToWorld(tmpH.set(q.x + nx * (ox + 0.05), 0, q.z + nz * (oz + 0.05)));
+    // the speed of the plate at the point of contact: how fast it slid, plus how
+    // fast that bit of it was swinging
+    const rx = p.x - board.x, rz = p.z - board.z;
+    cvel.set(dx / dt - w * rz, 0, dz / dt + w * rx);
+    const sp = Math.min(cvel.length(), 26);
+    detach(rec);
+    desk.add(rec.g);
+    rec.g.position.set(out.x, TABLE_Y, out.z);
+    cvel.setLength(Math.max(sp * 1.25, 3.5));     // always outruns the edge that hit it
+    flying.push({ g: rec.g, def: rec.def, rot: 0, mode:'discard', sticks:false, bounces:0, age:0,
+                  vel: new THREE.Vector3(cvel.x, 1.4 + sp * 0.12, cvel.z),
+                  spin: new THREE.Vector3(0, (Math.random() * 2 - 1) * (2 + sp * 0.3), 0) });
+    clatter();
+  }
+}
+
+function applyCamera(dt = 0) {
+  stepCoast(dt);
   view.tpol = clamp(view.bpol + HEAD.tilt, POL_MIN, POL_MAX);
   view.trad = clamp(view.brad * HEAD.push, RAD_MIN, RAD_MAX);
   view.pol  += (view.tpol  - view.pol)  * EASE;
@@ -906,7 +946,7 @@ function applyCamera() {
 const nav   = new Map();   // pointerId -> {x,y}
 const drags = new Map();   // pointerId -> {def, tile, held, ghost, sol, rot, az0}
 let grip = null;           // the board, held: see regrab()
-let onDeck = false;        // did this gesture start on the bench, or past it?
+let onBoard = false;       // did this gesture start on the plate, or off it?
 let manualRot = 0;         // optional 90° offset; the plate's angle does the rest
 let flickOn = true;        // throwing; F turns it off, there is no button
 let selected = 0;
@@ -919,7 +959,14 @@ function groundAt(x, y) {
   if (!castFrom(x, y)) return null;
   return ray.ray.intersectPlane(GROUND, gpt) ? gpt.clone() : null;
 }
-const onBench = p => !!p && p.x * p.x + p.z * p.z <= DESK_R * DESK_R;
+/* The bench is not the board. Putting a finger on the table beside a model and
+   having the model move is the sort of thing only software does — so the grip
+   is the plate's footprint and nothing else. */
+function onPlate(p) {
+  if (!p) return false;
+  const q = build.worldToLocal(p.clone());
+  return Math.abs(q.x) <= GRID / 2 && Math.abs(q.z) <= GRID / 2;
+}
 
 /* Take hold of the board — or take hold of it again, because a hand that gains
    or loses a finger is a different grip and has to be re-seated. What is
@@ -932,12 +979,15 @@ const onBench = p => !!p && p.x * p.x + p.z * p.z <= DESK_R * DESK_R;
 function regrab() {
   const pts = [...nav.values()];
   const gs = pts.map(p => groundAt(p.x, p.y));
-  if (!gs.length || gs.length > 2 || gs.some(g => !g)) { grip = null; onDeck = false; return; }
+  if (!gs.length || gs.length > 2 || gs.some(g => !g)) { grip = null; onBoard = false; return; }
   const m = gs.length === 2 ? gs[0].clone().add(gs[1]).multiplyScalar(0.5) : gs[0].clone();
-  onDeck = onBench(m);
-  if (!onDeck) { grip = null; return; }
+  onBoard = onPlate(m);
+  if (!onBoard) { grip = null; return; }
+  coast = null;                            // a hand on it stops it dead
   grip = {
     n: gs.length,
+    t: 0, vx: 0, vz: 0, vyaw: 0,           // how fast it is being pushed, for the let-go
+    lx: board.x, lz: board.z, lyaw: board.yaw,
     q: build.worldToLocal(m.clone()),      // the bit of board under the hand
     at: m.clone(),                          // ...and where it was last seen
     twist: gs.length === 2 ? Math.atan2(gs[1].z - gs[0].z, gs[1].x - gs[0].x) : 0,
@@ -964,14 +1014,12 @@ function moveNav(e) {
   const dx = e.clientX - p.x, dy = e.clientY - p.y;
   p.x = e.clientX; p.y = e.clientY;
 
-  /* Past the rim there is no board to hold, so a drag out there moves the head
-     instead: it is the one gesture that isn't about the object. It is also the
-     only way to tilt when the camera isn't watching you. */
-  if (!onDeck) {
-    if (nav.size === 1) {
-      board.tyaw += dx * 0.006;
-      view.bpol = clamp(view.bpol - dy * 0.006, POL_MIN, POL_MAX);
-    }
+  /* Off the plate there is nothing to hold, so the drag moves the head rather
+     than the board — the only way to tilt when the camera isn't watching you.
+     Deliberately tilt *only*: a hand on the bench is not touching the model,
+     and having the model answer to it is what felt wrong. */
+  if (!onBoard) {
+    if (nav.size === 1) view.bpol = clamp(view.bpol - dy * 0.006, POL_MIN, POL_MAX);
     return;
   }
   if (!grip) return;
@@ -1023,11 +1071,56 @@ function moveNav(e) {
   if (d > SLIDE_MAX) { bx *= SLIDE_MAX / d; bz *= SLIDE_MAX / d; }   // and never off the bench
   board.x = board.tx = bx;
   board.z = board.tz = bz;
+
+  // How fast it is being pushed, kept off the board's own motion rather than
+  // off the screen, so a let-go already accounts for the camera. Smoothed, and
+  // a hand that stops moving decays to nothing within a few frames — so a still
+  // release sets it down rather than throwing it.
+  const t = performance.now();
+  if (grip.t) {
+    const dt = (t - grip.t) / 1000;
+    if (dt > 0.001) {
+      grip.vx   = grip.vx   * 0.5 + ((board.x - grip.lx) / dt) * 0.5;
+      grip.vz   = grip.vz   * 0.5 + ((board.z - grip.lz) / dt) * 0.5;
+      grip.vyaw = grip.vyaw * 0.5 + (wrapPi(board.yaw - grip.lyaw) / dt) * 0.5;
+    }
+  }
+  grip.t = t; grip.lx = board.x; grip.lz = board.z; grip.lyaw = board.yaw;
   applyBoard();          // the next groundAt in this same gesture must see it
+}
+
+/* Let go of a shove and it runs on for a moment. A baseplate on a bench is not
+   nailed down — but it is a wide flat thing on a wide flat thing, so this is a
+   short slide, not a hockey puck. */
+const SLIDE_DRAG = 0.90;        // per 60th of a second
+const COAST_MAX  = 26;          // units/s, so a wild flick can't launch it
+const SPIN_MAX   = 3.4;         // rad/s
+let coast = null;
+function letGo(g) {
+  const sp = Math.hypot(g.vx, g.vz);
+  if (sp < 1.2 && Math.abs(g.vyaw) < 0.5) return;      // set down, not thrown
+  const k = sp > COAST_MAX ? COAST_MAX / sp : 1;
+  coast = { vx: g.vx * k, vz: g.vz * k, vyaw: clamp(g.vyaw, -SPIN_MAX, SPIN_MAX) };
+}
+function stepCoast(dt) {
+  if (!coast) return;
+  board.tyaw = board.yaw = board.yaw + coast.vyaw * dt;
+  let bx = board.x + coast.vx * dt, bz = board.z + coast.vz * dt;
+  const d = Math.hypot(bx, bz);
+  if (d > SLIDE_MAX) {                                  // into the rim, and stopped
+    bx *= SLIDE_MAX / d; bz *= SLIDE_MAX / d;
+    coast.vx = coast.vz = 0;
+  }
+  board.tx = board.x = bx;
+  board.tz = board.z = bz;
+  const k = Math.pow(SLIDE_DRAG, dt * 60);
+  coast.vx *= k; coast.vz *= k; coast.vyaw *= k;
+  if (Math.hypot(coast.vx, coast.vz) < 0.05 && Math.abs(coast.vyaw) < 0.02) coast = null;
 }
 
 function endNav(e) {
   if (!nav.delete(e.pointerId)) return;
+  if (!nav.size && onBoard && grip) letGo(grip);
   regrab();
 }
 
@@ -1157,7 +1250,7 @@ function liftBrick(pid, h) {
   const rec = h.rec;
   cancelHold(pid);
   nav.delete(pid);                                // this is a drag now, not a grip
-  grip = null; onDeck = false;
+  grip = null; onBoard = false;
   pluckSound(true);
   if (rec.kind === 'loose') {                     // a desk piece is only ever itself
     const def = rec.def;
@@ -1227,7 +1320,6 @@ function gridTurns(s) {
 /* Four, not two. Parity is enough for a rectangle, where a half turn looks the
    same as none — but a slope, a wedge or a rounded corner faces a direction,
    and two of its four headings were simply unreachable. */
-const gridRot = s => gridTurns(s) & 3;
 
 function beginDrag(e, def, srcEl, seedRot, asm, grab) {
   // A pointer id gets reused — a mouse is always id 1 — so a session that was
@@ -1271,7 +1363,13 @@ function refreshDrag(s) {
     s.tile.style.display = over ? 'none' : 'block'; // 3D takes over on the stage
   }
 
-  const turns = gridTurns(s), rot = turns & 1;
+  /* Four headings, not two. `& 1` is the seductive wrong answer here — it is
+     right for every rectangle, because a half turn of a 2x4 looks identical to
+     no turn at all, and wrong for everything that faces a direction. It is also
+     what the hand was never doing: the held piece has always animated through
+     all four, so a slope could be lined up by eye and then snap somewhere else
+     on release. */
+  const turns = gridTurns(s), rot = turns & 3;
   if (!s.held) {                                    // built once, then only turned
     s.held = s.asm ? buildAssembly(s.asm) : buildBrick(s.def);
     scene.add(s.held);
@@ -2436,7 +2534,20 @@ function paintHead() {
   headOnEl.checked = HEAD.on;
   headMirEl.checked = HEAD.mirror;
   headSpinBtn.textContent = `TURN INPUT ${HEAD.spin * 90}°`;
+  paintEyeBtn();
 }
+/* Its own way in, and it says at a glance whether the camera is running. The
+   panel is one sheet with two halves, so this opens the same thing the key
+   does and scrolls to the half you asked for. */
+const eyeBtn = document.getElementById('btnEye');
+eyeBtn.addEventListener('click', () => {
+  openDebug();
+  headOnEl.scrollIntoView({ block:'center' });
+});
+const paintEyeBtn = () => {
+  eyeBtn.classList.toggle('set', HEAD.live);
+  eyeBtn.title = HEAD.live ? 'Head tracking on' : 'Head tracking (experimental)';
+};
 headOnEl.addEventListener('change', () => {
   HEAD.on = headOnEl.checked;
   saveHead();
@@ -2494,7 +2605,7 @@ let lastT = performance.now();
 function tick(now) {
   const dt = Math.min((now - lastT) / 1000, 0.05);   // a throttled tab must not teleport
   lastT = now;
-  applyCamera();
+  applyCamera(dt);
   for (const s of drags.values()) refreshDrag(s);   // plate may have moved under the finger
   if (spring(boardY)) build.position.y = boardY.y;                 // board rebound
   else if (build.position.y) { boardY.y = boardY.v = 0; build.position.y = 0; }
@@ -2511,6 +2622,7 @@ function tick(now) {
     p.anim = null;
     land(p);
   }
+  sweep(dt);
   tickHolds(now);
   stepHead(now);
   stepDemolition(dt);
@@ -2533,4 +2645,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayIdea, askWhich, chat, sinceLast, get subject(){ return subject; }, get asked(){ return asked; }, get rejected(){ return rejected; }, toPalette, widenPalette, scramble, pickParts, get trayParts(){ return trayParts; }, get trayColours(){ return trayColours; }, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, board, desk, HEAD, findHead, groundAt, get grip(){ return grip; }, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridRot, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayIdea, askWhich, chat, sinceLast, get subject(){ return subject; }, get asked(){ return asked; }, get rejected(){ return rejected; }, toPalette, widenPalette, scramble, pickParts, get trayParts(){ return trayParts; }, get trayColours(){ return trayColours; }, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, board, desk, HEAD, findHead, groundAt, onPlate, sweep, stepCoast, get coast(){ return coast; }, get grip(){ return grip; }, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };

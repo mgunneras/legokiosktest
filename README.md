@@ -25,10 +25,11 @@ the board, which spins and slides underneath.
 
 | Where | Gesture | Result |
 |---|---|---|
-| Board or bench | 1 finger drag | push the board about — it slides, and turns a little, by where you pushed |
-| Board or bench | 2 finger twist | turn the board, 1:1 with your hand |
-| Board or bench | 2 finger pinch | zoom, clamped 12–56 units |
-| Past the bench | 1 finger drag | look around the room instead: tilt (17°–80°) and spin |
+| Baseplate | 1 finger drag | push the board about — it slides, and turns a little, by where you pushed |
+| Baseplate | 1 finger flick | let go while moving and it slides on for about a second |
+| Baseplate | 2 finger twist | turn the board, 1:1 with your hand |
+| Baseplate | 2 finger pinch | zoom, clamped 12–56 units |
+| Anywhere else | 1 finger drag | tilt, 17°–80°. Nothing else — a hand on the bench isn't touching the model |
 | Menu | press + drag onto plate | the brick hangs off your finger in 3D; a ghost below it shows the landing spot — it tints red only if the stack would go over `MAX_STACK` |
 | Menu | release | brick falls from your hand into the socket — pop, and the board bounces |
 | Plate | drop onto a placed brick | it stacks; courses can be staggered or overhang |
@@ -65,6 +66,22 @@ twist 1:1. Hard one-handed, easy two-handed, and neither is a special case.
 
 The board stops half a diagonal short of the bench rim, so no corner of it can
 ever hang over the edge, whichever way it has been spun.
+
+The grip is the **plate's footprint and nothing else**. Putting a finger on the
+table beside a model and having the model move is the sort of thing only
+software does; off the plate, a drag tilts and does nothing else.
+
+It isn't nailed down either. Let go while still pushing and it runs on —
+capped at 26 u/s, drag 0.90 per frame, so a hard flick travels about 4 units
+over a second and a set-down travels none (release speed under 1.2 u/s doesn't
+coast at all). Running the rim into the rim stops it dead.
+
+And the board is solid. Shove it into bricks lying on the bench and the leading
+edge knocks them clear, at whatever speed *that bit of the edge* is actually
+travelling — which for a spun board is faster at the corners than in the
+middle (`v = v_board + ω × r`). They tumble, bounce and settle where they land,
+because a model sliding through its own offcuts would give the whole thing
+away.
 
 ## How it works
 
@@ -479,7 +496,9 @@ GitHub Pages URL or `npm run dev`.
 Tilt isn't really a gesture. Nobody drags a bench to see more of its top — they
 lean over it. So the front camera can watch where your head is and the view
 leans with it: **up** for a plan view, **in** for a closer look, **sideways**
-for a little parallax. Turn it on behind the key icon, under HEAD TRACKING.
+for a little parallax. Turn it on behind the **eye icon**, top-right of the BRICKS header — next to
+the key. (The key is Gemini; burying a camera feature behind a button labelled
+"API key" is a good way for nobody to ever find it.)
 
 **How the head is found.** No model and no library — this has to survive being
 flattened into one file with nothing left to fetch. Frames go into a 64×48
