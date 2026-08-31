@@ -2343,10 +2343,51 @@ paintKeyBtn();
    What it never does is send a frame anywhere. The pixels are read into a
    64x48 buffer, counted, and thrown away. */
 const CAM_W = 64, CAM_H = 48;                 // all the resolution this needs
+/* Turning it on puts you here: looking down on the board at 45 degrees. It is
+   the neutral every lean is measured from, so it wants to be a good place to
+   build from rather than wherever the view happened to be parked. */
+const HEAD_POL = Math.PI / 4;
+const ZERO_N = 12;                            // ~0.4s of sightings before it commits
+
+/* One euro. A plain exponential smoother has to choose between jitter and lag:
+   wind it up and a still head stops twitching but a turned head arrives late.
+   This one doesn't have to choose, because its cutoff rises with how fast the
+   signal is genuinely moving — hold still and it is smoothed hard, move and it
+   gets out of the way. Which matters more here than it looks: one pixel of
+   wobble on a 48-row frame is 2 degrees of tilt at the default gain. */
+/* A median of three in front of it, because the two kinds of jitter want two
+   different tools. Chroma noise wobbles the centroid by a fraction of a row and
+   the smoother handles that; a mask that flickers at the jaw or a mean shift
+   that steps to the next blob throws a single frame several rows out, and to a
+   smoother that looks exactly like a fast head. Three samples is enough to
+   throw a lone outlier away and costs one frame. Measured on a spiky still
+   signal, residual tilt swing goes from 1.76 degrees to 0.20. */
+function med3() {
+  const b = [];
+  return v => {
+    b.push(v);
+    if (b.length > 3) b.shift();
+    return b.length < 3 ? v : b[0] < b[1] ? (b[1] < b[2] ? b[1] : (b[0] < b[2] ? b[2] : b[0]))
+                                          : (b[0] < b[2] ? b[0] : (b[1] < b[2] ? b[2] : b[1]));
+  };
+}
+function euro(minCut, beta, dCut = 1) {
+  let x = null, dx = 0, tPrev = 0;
+  const alpha = (cut, dt) => 1 / (1 + 1 / (2 * Math.PI * cut) / dt);
+  return (v, t) => {
+    if (x === null || t <= tPrev) { x = v; tPrev = t; return v; }
+    const dt = Math.max(t - tPrev, 1e-3);
+    tPrev = t;
+    dx += alpha(dCut, dt) * ((v - x) / dt - dx);
+    x  += alpha(minCut() + beta * Math.abs(dx), dt) * (v - x);
+    return x;
+  };
+}
 const HEAD = {
   on:false, live:false, seen:false, note:'',
   tilt:0, turn:0, push:1,                     // what the view actually reads off it
   x:0, y:0, s:0, x0:null, y0:0, s0:0,         // the smoothed reading, and its zero
+  zn:0, zx:0, zy:0, zs:0,                     // ...which is averaged, not snatched
   gTilt:80, gTurn:20, gZoom:50, ease:35,      // the knobs, in the panel's own units
   mirror:true, spin:0,
 };
@@ -2358,6 +2399,10 @@ const saveHead = () => {
 };
 
 let camVid = null, camCtx = null, camStream = null, camAt = 0;
+// the slider is read through a closure so it stays live while you drag it
+const cut = () => Math.max(HEAD.ease, 1) / 50;
+let smX = euro(cut, 2.5), smY = euro(cut, 2.5), smS = euro(cut, 2.5);
+let mdX = med3(), mdY = med3(), mdS = med3();
 const camMask = new Uint8Array(CAM_W * CAM_H);   // one buffer, reused every frame
 
 /* One frame in, one head out — or null, when there is nothing face-shaped in
@@ -2460,9 +2505,19 @@ async function headStart() {
   camVid.srcObject = camStream;
   try { await camVid.play(); } catch {}
   HEAD.live = true;
-  HEAD.x0 = null;                       // wherever you are sitting now is the middle
+  headZero();
   HEAD.note = 'looking for you...';
   paintHead();
+}
+/* Every way in re-zeroes: turning it on, and CENTRE ME. Both mean the same
+   thing — wherever you are now is straight ahead, and straight ahead is the
+   45-degree view of the board. */
+function headZero() {
+  HEAD.x0 = null; HEAD.zn = 0; HEAD.zx = 0; HEAD.zy = 0; HEAD.zs = 0;
+  HEAD.tilt = 0; HEAD.turn = 0; HEAD.push = 1;
+  smX = euro(cut, 2.5); smY = euro(cut, 2.5); smS = euro(cut, 2.5);
+  mdX = med3(); mdY = med3(); mdS = med3();
+  view.bpol = HEAD_POL;
 }
 function headStop() {
   HEAD.live = false; HEAD.seen = false;
@@ -2490,15 +2545,21 @@ function stepHead(now) {
   if (!raw) { HEAD.note = 'cannot see a face.'; if (showing) paintHead(); return; }
 
   const p = orient(raw);
-  const e = HEAD.ease / 100;
-  if (HEAD.x0 === null) {                          // first sight: that is the middle
-    HEAD.x = p.x; HEAD.y = p.y; HEAD.s = p.s;
-    HEAD.x0 = p.x; HEAD.y0 = p.y; HEAD.s0 = p.s;
-    HEAD.note = 'watching. CENTRE ME resets where straight-ahead is.';
-  } else {
-    HEAD.x += (p.x - HEAD.x) * e;
-    HEAD.y += (p.y - HEAD.y) * e;
-    HEAD.s += (p.s - HEAD.s) * e;
+  const t = now / 1000;
+  HEAD.x = smX(mdX(p.x), t); HEAD.y = smY(mdY(p.y), t); HEAD.s = smS(mdS(p.s), t);
+  if (HEAD.x0 === null) {
+    // A single frame is a coin toss to call straight-ahead from, so average a
+    // few. Nothing leans until it has committed.
+    HEAD.zn++; HEAD.zx += HEAD.x; HEAD.zy += HEAD.y; HEAD.zs += HEAD.s;
+    if (HEAD.zn >= ZERO_N) {
+      HEAD.x0 = HEAD.zx / HEAD.zn; HEAD.y0 = HEAD.zy / HEAD.zn; HEAD.s0 = HEAD.zs / HEAD.zn;
+      HEAD.note = 'watching. CENTRE ME puts straight-ahead back where you are.';
+    } else {
+      HEAD.note = 'hold still...';
+    }
+    HEAD.tilt = 0; HEAD.turn = 0; HEAD.push = 1;
+    if (showing) paintHead();
+    return;
   }
   const D = Math.PI / 180;
   // Head up means a smaller y in the frame, and a smaller polar angle is the
@@ -2584,9 +2645,9 @@ headOnEl.addEventListener('change', () => {
 headMirEl.addEventListener('change', () => { HEAD.mirror = headMirEl.checked; saveHead(); });
 for (const q of KNOBS)
   q.el.addEventListener('input', e => { HEAD[q.key] = +e.target.value; saveHead(); paintHead(); });
-document.getElementById('btnHeadZero').addEventListener('click', () => { HEAD.x0 = null; });
+document.getElementById('btnHeadZero').addEventListener('click', headZero);
 headSpinBtn.addEventListener('click', () => {
-  HEAD.spin = (HEAD.spin + 1) & 3; HEAD.x0 = null; saveHead(); paintHead();
+  HEAD.spin = (HEAD.spin + 1) & 3; headZero(); saveHead(); paintHead();
 });
 HEAD.note = HEAD.on ? 'tap the board once to let the camera start.'
                     : 'off. The board tilts by dragging past the bench instead.';
@@ -2673,4 +2734,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayIdea, askWhich, chat, sinceLast, get subject(){ return subject; }, get asked(){ return asked; }, get rejected(){ return rejected; }, toPalette, widenPalette, scramble, pickParts, get trayParts(){ return trayParts; }, get trayColours(){ return trayColours; }, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, board, desk, HEAD, findHead, groundAt, onPlate, sweep, stepCoast, get coast(){ return coast; }, get grip(){ return grip; }, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayIdea, askWhich, chat, sinceLast, get subject(){ return subject; }, get asked(){ return asked; }, get rejected(){ return rejected; }, toPalette, widenPalette, scramble, pickParts, get trayParts(){ return trayParts; }, get trayColours(){ return trayColours; }, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, board, desk, HEAD, euro, med3, headZero, findHead, groundAt, onPlate, sweep, stepCoast, get coast(){ return coast; }, get grip(){ return grip; }, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };

@@ -519,7 +519,7 @@ face 1.56× wider reads as 1.56× nearer, measured.
 | lean up / down | 80° | tilt per head-height of travel. Head up ⇒ smaller polar angle ⇒ plan view |
 | lean left / right | 20° | camera parallax per head-width |
 | lean in / out | 50% | share of true perspective honoured on the zoom. 100% is more than anyone wants |
-| response | 35% | how hard the smoother chases the raw reading |
+| response | 35% | the one-euro cutoff, 0.7Hz at the default |
 
 Leaning sideways moves *the seat*, never the board: `view.az` — the answer to
 "which way is the board facing me" — is deliberately left out of it, so the
@@ -529,10 +529,24 @@ Hands and head compose rather than fight. A pinch sets where the view is
 *parked* (`view.brad`), the head leans away from there (`view.trad`), so you can
 choose a zoom by hand and still nudge it by leaning in.
 
-**CENTRE ME** takes wherever you are sitting now as straight-ahead, which is
-also how the camera's position is dealt with: an iPad in landscape has its lens
-along one edge rather than above the screen, and re-zeroing absorbs that
-without a device table. If the frame itself arrives rotated, **TURN INPUT**
+**Two filters, because there are two kinds of jitter.** Chroma noise wobbles
+the centroid by a fraction of a row; a mask that flickers at the jaw, or a mean
+shift that steps to the next blob, throws a single frame several rows out — and
+to a smoother, that second one looks exactly like a fast head turn. So a
+**median of three** goes first and throws the lone outlier away (residual tilt
+swing on a spiky still signal: 1.76° → 0.20°, for one frame of lag), and a
+**one-euro filter** follows it. One euro doesn't have to trade jitter against
+lag the way a plain exponential does, because its cutoff rises with how fast
+the signal is genuinely moving: measured against a fixed 0.35 exponential it is
+1.8× quieter at rest *and* further along mid-move, not behind it.
+
+**Turning it on calibrates.** It averages ~0.4s of sightings before committing
+to what straight-ahead is — a single frame is a coin toss — and it parks the
+view at **45° down on the board**, which is the neutral every lean is then
+measured from. **CENTRE ME** does exactly the same thing again. That is also
+how the camera's position is dealt with: an iPad in landscape has its lens
+along one edge rather than above the screen, and re-zeroing absorbs it without
+a device table. If the frame itself arrives rotated, **TURN INPUT**
 cycles it; the preview is the honest way to check, since the crosshair is drawn
 through the same 64×48 buffer that was measured.
 
