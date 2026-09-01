@@ -514,10 +514,18 @@ face 1.56× wider reads as 1.56× nearer, measured.
 
 **What it drives.** The knobs are gains, not modes, and every one is live:
 
+Both axes are measured against the frame's **width**. Dividing `y` by the
+height instead makes the same real head movement read 4/3 larger going up than
+going sideways, which quietly turns the two gain sliders into two different
+rulers — they are only comparable if the number underneath them means the same
+thing. With that fixed and the gains rebalanced, equal travel on each axis is
+2:1 tilt-to-turn rather than 7:1, and cross-talk is exactly zero: pure sideways
+movement produces 0.00° of tilt, pure vertical 0.00° of turn.
+
 | Knob | Default | What it does |
 |---|---|---|
-| lean up / down | 80° | tilt per head-height of travel. Head up ⇒ smaller polar angle ⇒ plan view |
-| lean left / right | 20° | camera parallax per head-width |
+| lean up / down | 90° | tilt per frame-width of travel. Head up ⇒ smaller polar angle ⇒ plan view |
+| lean left / right | 45° | camera parallax, same ruler |
 | lean in / out | 50% | share of true perspective honoured on the zoom. 100% is more than anyone wants |
 | response | 35% | the one-euro cutoff, 0.7Hz at the default |
 

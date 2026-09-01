@@ -2388,12 +2388,17 @@ const HEAD = {
   tilt:0, turn:0, push:1,                     // what the view actually reads off it
   x:0, y:0, s:0, x0:null, y0:0, s0:0,         // the smoothed reading, and its zero
   zn:0, zx:0, zy:0, zs:0,                     // ...which is averaged, not snatched
-  gTilt:80, gTurn:20, gZoom:50, ease:35,      // the knobs, in the panel's own units
+  gTilt:90, gTurn:45, gZoom:50, ease:35,      // the knobs, in the panel's own units
   mirror:true, spin:0,
 };
-Object.assign(HEAD, cfg.head || {});
+/* The gains changed what they are measured against, so anything saved under the
+   old ruler is not worth keeping — it would silently be wrong rather than
+   merely stale. Everything else survives. */
+const HEAD_V = 2;
+if (cfg.head && cfg.head.v === HEAD_V) Object.assign(HEAD, cfg.head);
+else if (cfg.head) { const { gTilt, gTurn, ...rest } = cfg.head; Object.assign(HEAD, rest); }
 const saveHead = () => {
-  cfg.head = { gTilt:HEAD.gTilt, gTurn:HEAD.gTurn, gZoom:HEAD.gZoom,
+  cfg.head = { v:HEAD_V, gTilt:HEAD.gTilt, gTurn:HEAD.gTurn, gZoom:HEAD.gZoom,
                ease:HEAD.ease, mirror:HEAD.mirror, spin:HEAD.spin, on:HEAD.on };
   saveCfg();
 };
@@ -2433,10 +2438,15 @@ function findHead(px) {
     if (!c) break;
     cx = ax / c; cy = ay / c; cnt = c; rad *= 0.8;
   }
+  // Both axes are measured against the frame's *width*, not against their own
+  // extent. Dividing y by the height instead makes the same real head movement
+  // read 4/3 larger going up than going sideways, which quietly turns the two
+  // gain sliders into two different rulers — they are only comparable if the
+  // number underneath them means the same thing.
   // Area stands in for distance: a face twice as close covers four times as
   // much frame, so its square root is the one that moves linearly.
-  return { x: cx / CAM_W - 0.5, y: cy / CAM_H - 0.5, s: Math.sqrt(cnt) / CAM_W, cx, cy,
-           r: Math.sqrt(cnt / Math.PI) };
+  return { x: (cx - CAM_W / 2) / CAM_W, y: (cy - CAM_H / 2) / CAM_W,
+           s: Math.sqrt(cnt) / CAM_W, cx, cy, r: Math.sqrt(cnt / Math.PI) };
 }
 
 /* The frame does not always arrive the way up the screen is — an iPad held in
@@ -2535,7 +2545,14 @@ function stepHead(now) {
   camAt = now;
   if (!camVid.videoWidth) return;
   camCtx.drawImage(camVid, 0, 0, CAM_W, CAM_H);
-  const img = camCtx.getImageData(0, 0, CAM_W, CAM_H);
+  readHead(camCtx.getImageData(0, 0, CAM_W, CAM_H), now);
+}
+
+/* Everything from one frame to what the view reads off it. Split out from the
+   frame-grabbing so it can be driven with a made-up face, which is the only way
+   to answer "does moving left really only turn, and not tilt" without sitting
+   in front of it guessing. */
+function readHead(img, now) {
   const raw = findHead(img.data);
   // The preview and the readout exist to be tuned against. Drawing them at
   // 30Hz behind a closed panel is pure waste, so they only run when open.
@@ -2734,4 +2751,4 @@ addEventListener('gesturestart', e => e.preventDefault());
 addEventListener('dblclick', e => e.preventDefault());
 
 /* debug hook — handy on-site for poking state from devtools */
-window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayIdea, askWhich, chat, sinceLast, get subject(){ return subject; }, get asked(){ return asked; }, get rejected(){ return rejected; }, toPalette, widenPalette, scramble, pickParts, get trayParts(){ return trayParts; }, get trayColours(){ return trayColours; }, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, board, desk, HEAD, euro, med3, headZero, findHead, groundAt, onPlate, sweep, stepCoast, get coast(){ return coast; }, get grip(){ return grip; }, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
+window.__kiosk = { placed, loose, flying, holds, pickList, heights, cfg, sceneSummary, say, sayIdea, askWhich, chat, sinceLast, get subject(){ return subject; }, get asked(){ return asked; }, get rejected(){ return rejected; }, toPalette, widenPalette, scramble, pickParts, get trayParts(){ return trayParts; }, get trayColours(){ return trayColours; }, get tray(){ return tray; }, assemblyOf, toLocal, turnAsm, solveAsm, view, board, desk, HEAD, euro, med3, headZero, findHead, readHead, orient, groundAt, onPlate, sweep, stepCoast, get coast(){ return coast; }, get grip(){ return grip; }, drags, nav, CATALOG, solve, hitList, camera, scene, build, ray, ndc, THREE, gridTurns, popSound, boardY, solveAt, placeX, place, matable, canMate, audioState, launch, stepFlight, stepDemolition, tickHolds, chuck, isFree, detach, demolish, demolition, get flickOn(){ return flickOn; }, get manualRot(){ return manualRot; } };
